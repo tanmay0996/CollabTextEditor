@@ -1,124 +1,190 @@
-// src/pages/EditorPage.jsx
+// client/src/pages/EditorPage.jsx
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import ReactQuill from 'react-quill';
-import 'react-quill/dist/quill.snow.css';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
 import api, { setAuthToken } from '../services/api';
 import { getToken } from '../utils/auth';
 import { createSocket } from '../services/socket';
 
 export default function EditorPage() {
   const { id: documentId } = useParams();
-  const [value, setValue] = useState('');
-  const [connected, setConnected] = useState(false);
-  const quillRef = useRef(null);
+  const [status, setStatus] = useState('loading'); // loading | ready | error
+  const editorRef = useRef(null);
   const socketRef = useRef(null);
+  const applyingRemoteRef = useRef(false);
 
-  useEffect(() => {
-    const token = getToken();
-    if (token) setAuthToken(token);
+  // create editor (empty initial content, we'll set content after loading)
+  const editor = useEditor({
+    extensions: [StarterKit],
+    content: '', // will set later from server
+    autofocus: true,
+    onUpdate: ({ editor, transaction }) => {
+      // Skip broadcasting when applying remote changes
+      if (applyingRemoteRef.current) return;
 
-    // fetch doc data for initial content
-    async function loadDoc() {
+      // throttle/limit frequency of emits: simple time-based throttle
+      const now = Date.now();
+      if (!editorRef.current) editorRef.current = { lastSent: 0 };
+      const lastSent = editorRef.current.lastSent || 0;
+      // send at most once per 300ms
+      if (now - lastSent < 300) return;
+      editorRef.current.lastSent = now;
+
       try {
-        const res = await api.get(`/documents/${documentId}`);
-        // doc.data might be Quill delta or HTML; try use as HTML string if present
-        const data = res.data?.data;
-        if (typeof data === 'string') setValue(data);
-        else if (data && data.ops) {
-          // Quill delta -> convert to HTML by setting contents (we'll set as plain text fallback)
-          // Simplest: set stored delta as HTML via deltaToHtml? For now use Quill to set contents on mount via ref.
-          // We'll store delta as JSON string inside a hidden prop and apply once Quill exists.
-          // For now: keep a JSON string in value to apply later.
-          setValue(''); // will be replaced once editor mounted
-          // store delta on socket join later
-          socketRef.current?.emit && socketRef.current.emit('load-delta', { documentId, delta: data });
-        } else setValue('');
+        const json = editor.getJSON();
+        if (socketRef.current?.connected) {
+          socketRef.current.emit('editor-update', { documentId, json });
+        }
       } catch (err) {
-        console.error('load doc err', err);
+        console.warn('emit editor-update failed', err);
+      }
+    },
+  });
+
+  // Load initial document content (HTTP)
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDoc() {
+      setStatus('loading');
+      try {
+        const token = getToken();
+        if (token) setAuthToken(token);
+
+        const res = await api.get(`/documents/${documentId}`);
+        if (cancelled) return;
+        const serverData = res.data?.data;
+
+        // server may store html string OR JSON doc
+        if (!editor) {
+          // editor not ready yet; we'll handle when editor becomes ready
+          setStatus('ready');
+          return;
+        }
+
+        applyingRemoteRef.current = true;
+        if (!serverData) {
+          editor.commands.setContent({ type: 'doc', content: [{ type: 'paragraph' }] });
+        } else if (typeof serverData === 'string') {
+          // if stored as HTML string, set as text/HTML
+          editor.commands.setContent(serverData);
+        } else {
+          // assume Tiptap/Prosemirror JSON
+          editor.commands.setContent(serverData);
+        }
+        applyingRemoteRef.current = false;
+        setStatus('ready');
+      } catch (err) {
+        console.error('Load document failed', err);
+        if (!cancelled) setStatus('error');
       }
     }
     loadDoc();
+    return () => { cancelled = true; };
     // eslint-disable-next-line
-  }, [documentId]);
+  }, [documentId, editor]);
 
+  // Socket setup (join room, receive remote updates)
   useEffect(() => {
     const token = getToken();
     const socket = createSocket(token);
     socketRef.current = socket;
 
+    // connect and join
     socket.connect();
 
     socket.on('connect', () => {
-      setConnected(true);
+      // join this document room
       socket.emit('join-document', { documentId });
     });
 
-    socket.on('document-data', (data) => {
-      // server may send HTML or raw string
-      if (typeof data === 'string') setValue(data);
-      else if (data && data.ops) {
-        // if delta sent, apply to editor once ready
-        const editor = quillRef.current?.getEditor();
-        if (editor) editor.setContents(data);
-        else setValue(''); // fallback
-      }
-    });
-
-    socket.on('remote-text-change', (delta) => {
-      // apply delta
-      const editor = quillRef.current?.getEditor();
+    // initial document data from socket (if server chooses to send)
+    socket.on('document-data', (payload) => {
+      // payload expected: { json } or raw json or html string
       if (!editor) return;
       try {
-        editor.updateContents(delta);
+        applyingRemoteRef.current = true;
+        if (!payload) {
+          editor.commands.setContent({ type: 'doc', content: [{ type: 'paragraph' }] });
+        } else if (payload.json) {
+          editor.commands.setContent(payload.json);
+        } else if (typeof payload === 'string') {
+          editor.commands.setContent(payload);
+        } else {
+          // assume json doc
+          editor.commands.setContent(payload);
+        }
       } catch (err) {
-        console.warn('apply delta failed', err);
+        console.warn('apply document-data failed', err);
+      } finally {
+        applyingRemoteRef.current = false;
+        setStatus('ready');
       }
     });
 
-    socket.on('disconnect', () => setConnected(false));
+    socket.on('remote-editor-update', ({ json, from }) => {
+      // apply remote update if it's not from self
+      if (!editor) return;
+      try {
+        // avoid applying if update is empty
+        if (!json) return;
+        applyingRemoteRef.current = true;
+        editor.commands.setContent(json);
+      } catch (err) {
+        console.warn('apply remote update failed', err);
+      } finally {
+        // small timeout to ensure onUpdate from setContent is ignored
+        setTimeout(() => { applyingRemoteRef.current = false; }, 30);
+      }
+    });
+
+    socket.on('document-saved', (meta) => {
+      // optional UI hook: show saved indicator briefly
+      console.log('document-saved', meta);
+    });
+
+    socket.on('disconnect', () => {
+      console.log('socket disconnected');
+    });
 
     return () => {
-      socket.disconnect();
+      if (socket) socket.disconnect();
     };
     // eslint-disable-next-line
-  }, [documentId]);
+  }, [documentId, editor]);
 
-  function handleChange(content, delta, source) {
-    setValue(content);
-    if (source === 'user' && socketRef.current && socketRef.current.connected) {
-      socketRef.current.emit('text-change', { documentId, delta });
-    }
-  }
-
-  // autosave via HTTP every 30s
+  // Autosave via HTTP every 30s
   useEffect(() => {
     const iv = setInterval(async () => {
+      if (!editor) return;
       try {
-        // saving HTML string value (simple). For stronger fidelity store Quill delta instead.
-        await api.put(`/documents/${documentId}`, { data: value });
-        if (socketRef.current?.connected) socketRef.current.emit('save-document', { documentId, data: value });
+        const json = editor.getJSON();
+        await api.put(`/documents/${documentId}`, { data: json });
+        if (socketRef.current?.connected) {
+          socketRef.current.emit('save-document', { documentId, data: json });
+        }
       } catch (err) {
-        console.warn('autosave failed', err);
+        console.warn('Autosave failed', err);
       }
     }, 30000);
     return () => clearInterval(iv);
-  }, [documentId, value]);
+  }, [documentId, editor]);
+
+  // cleanup
+  useEffect(() => {
+    return () => {
+      editor?.destroy();
+    };
+  }, [editor]);
 
   return (
     <div style={{ padding: 12 }}>
       <div style={{ marginBottom: 8 }}>
-        Document: <strong>{documentId}</strong> — Socket: <strong>{connected ? 'connected' : 'disconnected'}</strong>
+        <strong>Document:</strong> {documentId} — <strong>Status:</strong> {status}
       </div>
 
-      <div style={{ border: '1px solid #ddd', borderRadius: 8 }}>
-        <ReactQuill
-          ref={quillRef}
-          theme="snow"
-          value={value}
-          onChange={handleChange}
-          style={{ minHeight: 400 }}
-        />
+      <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 8, minHeight: 300 }}>
+        {editor ? <EditorContent editor={editor} /> : <div>Loading editor…</div>}
       </div>
     </div>
   );
