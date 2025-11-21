@@ -56,12 +56,19 @@ function isTextComplete(text) {
   const lastChar = trimmed[trimmed.length - 1];
   const sentenceEnders = ['.', '!', '?', '。', '।'];
   
+  // Only block if it ends with punctuation AND looks deliberately finished
   if (sentenceEnders.includes(lastChar)) {
-    const sentences = trimmed.split(/[.!?]+/).filter(s => s.trim().length > 0);
-    return sentences.length >= 1 && trimmed.length > 20;
+    // Check if there's trailing content that suggests continuation
+    const words = trimmed.split(/\s+/);
+    const lastWord = words[words.length - 1];
+    
+    // Allow if the last "sentence" is very short (likely just starting)
+    if (lastWord.length <= 3) return false;
+    
+    return true; // Ends with punctuation, likely complete
   }
   
-  return false;
+  return false; // Doesn't end with punctuation, clearly incomplete
 }
 
 function isTooShort(text, minLength = 15) {
