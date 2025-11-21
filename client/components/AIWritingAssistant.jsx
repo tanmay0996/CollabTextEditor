@@ -61,6 +61,22 @@ export default function AIWritingAssistant({
   const visibleCorrections = (grammarState.data?.corrections || []).filter((_, i) => !dismissedCorrections.has(i));
   const visibleSuggestions = (suggestionsState.data?.ideas || []).filter((_, i) => !dismissedSuggestions.has(i));
 
+  // Inline style fallbacks (used in addition to Tailwind classes)
+  const baseBtnStyle = {
+    minHeight: '40px',
+    minWidth: '90px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+    zIndex: 1,
+  };
+  const primaryBlue = '#2563EB';   // tailwind blue-600
+  const primaryBlueHover = '#1D4ED8'; // blue-700
+  const green600 = '#16A34A';
+  const green700 = '#15803D';
+  const gray600 = '#4B5563';
+  const gray200 = '#E5E7EB';
+  const blue100 = '#DBEAFE';
+  const gray100 = '#F3F4F6';
+
   return (
     <div className="flex flex-col h-full">
       {/* Tab Navigation */}
@@ -92,11 +108,16 @@ export default function AIWritingAssistant({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-900">Grammar & Style Check</h3>
-              <button onClick={onCheckGrammar} disabled={grammarState.status === 'loading'} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+              <button
+                onClick={onCheckGrammar}
+                disabled={grammarState.status === 'loading'}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                style={{ ...baseBtnStyle, backgroundColor: primaryBlue, color: '#fff' }}
+              >
                 {grammarState.status === 'loading' ? (
-                  <><RefreshCw className="w-4 h-4 animate-spin" /> Checking...</>
+                  <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Checking...</>
                 ) : (
-                  <><CheckCircle2 className="w-4 h-4" /> Check</>
+                  <><CheckCircle2 className="w-4 h-4 text-white" /> Check</>
                 )}
               </button>
             </div>
@@ -117,11 +138,19 @@ export default function AIWritingAssistant({
 
                 {/* Bulk Actions */}
                 <div className="flex gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
-                  <button onClick={onApplyAllGrammarFixes} className="flex-1 flex items-center justify-center gap-2 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors">
-                    <Check className="w-4 h-4" /> Accept All
+                  <button
+                    onClick={onApplyAllGrammarFixes}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                    style={{ ...baseBtnStyle, backgroundColor: green600, color: '#fff' }}
+                  >
+                    <Check className="w-4 h-4 text-white" /> Accept All
                   </button>
-                  <button onClick={dismissAllCorrections} className="flex-1 flex items-center justify-center gap-2 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors">
-                    <X className="w-4 h-4" /> Decline All
+                  <button
+                    onClick={dismissAllCorrections}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors"
+                    style={{ ...baseBtnStyle, backgroundColor: gray600, color: '#fff' }}
+                  >
+                    <X className="w-4 h-4 text-white" /> Decline All
                   </button>
                 </div>
 
@@ -143,6 +172,7 @@ export default function AIWritingAssistant({
                         onDecline={() => dismissCorrectionLocal(originalIndex)}
                         expanded={expandedItems.has(`grammar-${originalIndex}`)}
                         onToggleExpand={() => toggleExpand(`grammar-${originalIndex}`)}
+                        // pass styles via props if needed (we keep card self-contained)
                       />
                     );
                   })}
@@ -168,11 +198,16 @@ export default function AIWritingAssistant({
                   {selectionText ? 'Enhancing selected text' : 'Enhancing entire document'}
                 </p>
               </div>
-              <button onClick={onEnhanceText} disabled={enhancementState.status === 'loading'} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+              <button
+                onClick={onEnhanceText}
+                disabled={enhancementState.status === 'loading'}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                style={{ ...baseBtnStyle, backgroundColor: primaryBlue, color: '#fff' }}
+              >
                 {enhancementState.status === 'loading' ? (
-                  <><RefreshCw className="w-4 h-4 animate-spin" /> Enhancing...</>
+                  <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Enhancing...</>
                 ) : (
-                  <><Wand2 className="w-4 h-4" /> Enhance</>
+                  <><Wand2 className="w-4 h-4 text-white" /> Enhance</>
                 )}
               </button>
             </div>
@@ -203,13 +238,25 @@ export default function AIWritingAssistant({
 
                 {/* Action Buttons */}
                 <div className="flex gap-2">
-                  <button onClick={() => { onApplyEnhancement?.(enhancementState.data.improved); /* parent will clear state */ }} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors">
-                    <Check className="w-4 h-4" /> Accept
+                  <button
+                    onClick={() => { onApplyEnhancement?.(enhancementState.data.improved); /* parent will clear state */ }}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                    style={{ ...baseBtnStyle, backgroundColor: green600, color: '#fff' }}
+                  >
+                    <Check className="w-4 h-4 text-white" /> Accept
                   </button>
-                  <button onClick={() => { onDeclineEnhancement?.(); setDismissedCorrections(new Set()); }} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors">
-                    <X className="w-4 h-4" /> Decline
+                  <button
+                    onClick={() => { onDeclineEnhancement?.(); setDismissedCorrections(new Set()); }}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors"
+                    style={{ ...baseBtnStyle, backgroundColor: gray600, color: '#fff' }}
+                  >
+                    <X className="w-4 h-4 text-white" /> Decline
                   </button>
-                  <button onClick={onRegenerateEnhancement} className="px-4 py-2.5 bg-blue-100 text-blue-700 text-sm font-medium rounded-lg hover:bg-blue-200 transition-colors">
+                  <button
+                    onClick={onRegenerateEnhancement}
+                    className="px-4 py-2.5 bg-blue-100 text-blue-700 text-sm font-medium rounded-lg hover:bg-blue-200 transition-colors"
+                    style={{ ...baseBtnStyle, backgroundColor: blue100, color: '#1e3a8a' }}
+                  >
                     <RefreshCw className="w-4 h-4" />
                   </button>
                 </div>
@@ -225,11 +272,16 @@ export default function AIWritingAssistant({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-900">Content Summary</h3>
-              <button onClick={onGenerateSummary} disabled={summaryState.status === 'loading'} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+              <button
+                onClick={onGenerateSummary}
+                disabled={summaryState.status === 'loading'}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                style={{ ...baseBtnStyle, backgroundColor: primaryBlue, color: '#fff' }}
+              >
                 {summaryState.status === 'loading' ? (
-                  <><RefreshCw className="w-4 h-4 animate-spin" /> Generating...</>
+                  <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Generating...</>
                 ) : (
-                  <><BookOpen className="w-4 h-4" /> Summarize</>
+                  <><BookOpen className="w-4 h-4 text-white" /> Summarize</>
                 )}
               </button>
             </div>
@@ -256,16 +308,32 @@ export default function AIWritingAssistant({
 
                 {/* Action Buttons */}
                 <div className="flex gap-2">
-                  <button onClick={onCopySummary} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
+                  <button
+                    onClick={onCopySummary}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+                    style={{ ...baseBtnStyle, backgroundColor: gray100, color: '#374151' }}
+                  >
                     <Copy className="w-4 h-4" /> Copy
                   </button>
-                  <button onClick={onInsertSummary} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors">
-                    <Download className="w-4 h-4" /> Insert
+                  <button
+                    onClick={onInsertSummary}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                    style={{ ...baseBtnStyle, backgroundColor: primaryBlue, color: '#fff' }}
+                  >
+                    <Download className="w-4 h-4 text-white" /> Insert
                   </button>
-                  <button onClick={() => { onDeclineSummary?.(); }} className="flex items-center gap-2 px-4 py-2.5 bg-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-300 transition-colors">
+                  <button
+                    onClick={() => { onDeclineSummary?.(); }}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-300 transition-colors"
+                    style={{ ...baseBtnStyle, backgroundColor: gray200, color: '#374151', minWidth: '80px' }}
+                  >
                     <X className="w-4 h-4" /> Decline
                   </button>
-                  <button onClick={onRegenerateSummary} className="px-4 py-2.5 bg-blue-100 text-blue-700 text-sm font-medium rounded-lg hover:bg-blue-200 transition-colors">
+                  <button
+                    onClick={onRegenerateSummary}
+                    className="px-4 py-2.5 bg-blue-100 text-blue-700 text-sm font-medium rounded-lg hover:bg-blue-200 transition-colors"
+                    style={{ ...baseBtnStyle, backgroundColor: blue100, color: '#1e3a8a' }}
+                  >
                     <RefreshCw className="w-4 h-4" />
                   </button>
                 </div>
@@ -281,11 +349,16 @@ export default function AIWritingAssistant({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-900">Smart Auto-Complete</h3>
-              <button onClick={onGetCompletion} disabled={completionState.status === 'loading'} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+              <button
+                onClick={onGetCompletion}
+                disabled={completionState.status === 'loading'}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                style={{ ...baseBtnStyle, backgroundColor: primaryBlue, color: '#fff' }}
+              >
                 {completionState.status === 'loading' ? (
-                  <><RefreshCw className="w-4 h-4 animate-spin" /> Generating...</>
+                  <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Generating...</>
                 ) : (
-                  <><Sparkles className="w-4 h-4" /> Complete</>
+                  <><Sparkles className="w-4 h-4 text-white" /> Complete</>
                 )}
               </button>
             </div>
@@ -306,11 +379,19 @@ export default function AIWritingAssistant({
                 </div>
 
                 <div className="flex gap-2">
-                  <button onClick={() => { onInsertCompletion?.(completionState.data.completion); }} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors">
-                    <Check className="w-4 h-4" /> Accept
+                  <button
+                    onClick={() => { onInsertCompletion?.(completionState.data.completion); }}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+                    style={{ ...baseBtnStyle, backgroundColor: green600, color: '#fff' }}
+                  >
+                    <Check className="w-4 h-4 text-white" /> Accept
                   </button>
-                  <button onClick={() => { onDeclineCompletion?.(); }} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors">
-                    <X className="w-4 h-4" /> Decline
+                  <button
+                    onClick={() => { onDeclineCompletion?.(); }}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors"
+                    style={{ ...baseBtnStyle, backgroundColor: gray600, color: '#fff' }}
+                  >
+                    <X className="w-4 h-4 text-white" /> Decline
                   </button>
                 </div>
               </div>
@@ -325,11 +406,16 @@ export default function AIWritingAssistant({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-900">Writing Suggestions</h3>
-              <button onClick={onGetSuggestions} disabled={suggestionsState.status === 'loading'} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+              <button
+                onClick={onGetSuggestions}
+                disabled={suggestionsState.status === 'loading'}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                style={{ ...baseBtnStyle, backgroundColor: primaryBlue, color: '#fff' }}
+              >
                 {suggestionsState.status === 'loading' ? (
-                  <><RefreshCw className="w-4 h-4 animate-spin" /> Loading...</>
+                  <><RefreshCw className="w-4 h-4 animate-spin text-white" /> Loading...</>
                 ) : (
-                  <><Lightbulb className="w-4 h-4" /> Get Ideas</>
+                  <><Lightbulb className="w-4 h-4 text-white" /> Get Ideas</>
                 )}
               </button>
             </div>
@@ -380,13 +466,16 @@ function GrammarCorrectionCard({ item, onAccept, onDecline, expanded, onToggleEx
     info: 'bg-blue-100 text-blue-700 border-blue-200',
   };
 
+  // Smaller base for the compact cards
+  const compactBtnStyle = { minHeight: '36px', minWidth: '72px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', zIndex: 1 };
+
   return (
     <div className="p-3 bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow">
       <div className="flex items-start justify-between gap-2 mb-2">
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${severityColors[item.severity] || severityColors.info}`}>
           {item.type || 'Grammar'}
         </span>
-        <button onClick={onToggleExpand} className="text-gray-400 hover:text-gray-600">
+        <button onClick={onToggleExpand} className="text-gray-400 hover:text-gray-600" aria-label={expanded ? 'Collapse' : 'Expand'}>
           {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
       </div>
@@ -411,11 +500,11 @@ function GrammarCorrectionCard({ item, onAccept, onDecline, expanded, onToggleEx
       )}
 
       <div className="flex gap-2">
-        <button onClick={onAccept} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors">
-          <Check className="w-3.5 h-3.5" /> Accept
+        <button onClick={onAccept} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors" style={{ ...compactBtnStyle, backgroundColor: '#16A34A', color: '#fff' }} aria-label="Accept correction">
+          <Check className="w-3.5 h-3.5 text-white" /> Accept
         </button>
-        <button onClick={onDecline} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-gray-200 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-300 transition-colors">
-          <X className="w-3.5 h-3.5" /> Decline
+        <button onClick={onDecline} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-gray-200 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-300 transition-colors" style={{ ...compactBtnStyle, backgroundColor: '#E5E7EB', color: '#374151' }} aria-label="Decline correction">
+          <X className="w-3.5 h-3.5 text-gray-700" /> Decline
         </button>
       </div>
     </div>
@@ -423,6 +512,7 @@ function GrammarCorrectionCard({ item, onAccept, onDecline, expanded, onToggleEx
 }
 
 function SuggestionCard({ idea, onApply, onDismiss, onMoreInfo, expanded }) {
+  const suggestionBtnStyle = { minHeight: '36px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', zIndex: 1 };
   return (
     <div className="p-3 bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow">
       <p className="text-sm font-semibold text-gray-900 mb-1 flex items-center gap-2">
@@ -432,14 +522,14 @@ function SuggestionCard({ idea, onApply, onDismiss, onMoreInfo, expanded }) {
       <p className={`text-sm text-gray-600 leading-relaxed ${expanded ? '' : 'line-clamp-2'}`}>{idea.detail}</p>
       
       <div className="flex gap-2 mt-3">
-        <button onClick={onApply} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors">
-          <Check className="w-3.5 h-3.5" /> Apply
+        <button onClick={onApply} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors" style={{ ...suggestionBtnStyle, backgroundColor: '#16A34A', color: '#fff' }}>
+          <Check className="w-3.5 h-3.5 text-white" /> Apply
         </button>
-        <button onClick={onDismiss} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-300 transition-colors">
-          <X className="w-3.5 h-3.5" /> Dismiss
+        <button onClick={onDismiss} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-300 transition-colors" style={{ ...suggestionBtnStyle, backgroundColor: '#E5E7EB', color: '#374151' }}>
+          <X className="w-3.5 h-3.5 text-gray-700" /> Dismiss
         </button>
-        <button onClick={onMoreInfo} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-lg hover:bg-blue-200 transition-colors">
-          <Info className="w-3.5 h-3.5" /> {expanded ? 'Less' : 'More'}
+        <button onClick={onMoreInfo} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-lg hover:bg-blue-200 transition-colors" style={{ ...suggestionBtnStyle, backgroundColor: '#DBEAFE', color: '#1E3A8A' }}>
+          <Info className="w-3.5 h-3.5 text-blue-700" /> {expanded ? 'Less' : 'More'}
         </button>
       </div>
     </div>
