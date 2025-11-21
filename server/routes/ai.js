@@ -4,9 +4,15 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const { generateJson, getGeminiStats } = require('../services/gemini');
 
+// REMOVED HARSH LIMITS - Making it robust
 const RATE_WINDOW_MS = 60_000;
-const RATE_LIMIT = Number(process.env.AI_RATE_LIMIT || 10);
-const MAX_TEXT_LENGTH = Number(process.env.AI_MAX_TEXT || 8000);
+const RATE_LIMIT = Number(process.env.AI_RATE_LIMIT || 60); // Increased from 10 to 60
+const MAX_TEXT_LENGTH = Number(process.env.AI_MAX_TEXT || 100000); // Increased from 8000 to 100k
+
+// Model configuration
+// Default model comes from env (gemini-2.5-pro)
+// But we explicitly use Flash for auto-complete (faster, less conservative)
+const MODEL_FLASH = 'gemini-2.5-flash';
 
 const Typo = require('typo-js');
 const dictionary = new Typo('en_US');
@@ -59,19 +65,14 @@ function isTextComplete(text) {
   const lastChar = trimmed[trimmed.length - 1];
   const sentenceEnders = ['.', '!', '?', '。', '।'];
   
-  // Only block if it ends with punctuation AND looks deliberately finished
   if (sentenceEnders.includes(lastChar)) {
-    // Check if there's trailing content that suggests continuation
     const words = trimmed.split(/\s+/);
     const lastWord = words[words.length - 1];
-    
-    // Allow if the last "sentence" is very short (likely just starting)
     if (lastWord.length <= 3) return false;
-    
-    return true; // Ends with punctuation, likely complete
+    return true;
   }
   
-  return false; // Doesn't end with punctuation, clearly incomplete
+  return false;
 }
 
 function isTooShort(text, minLength = 15) {
@@ -79,7 +80,6 @@ function isTooShort(text, minLength = 15) {
 }
 
 async function generateGrammarInsights(text) {
-  // First, do a real spell check to find actual errors using typo-js
   const words = text.match(/\b[\w']+\b/g) || [];
   const spellingErrors = [];
   
@@ -95,7 +95,6 @@ async function generateGrammarInsights(text) {
     }
   });
 
-  // Now tell the AI about the spelling errors we found
   const spellingContext = spellingErrors.length > 0 
     ? `\n\nSPELLING ERRORS DETECTED: ${spellingErrors.map(e => `"${e.word}" should be "${e.suggestions[0]}"`).join(', ')}`
     : '';
@@ -137,10 +136,10 @@ CRITICAL:
 - For each error, provide "original" and "corrected" fields
 - Be thorough and catch all mistakes`;
 
+  // Uses env default model (gemini-2.5-pro)
   const json = await generateJson(prompt, { 
     temperature: 0.1, 
-    maxOutputTokens: 2048,
-    model: 'gemini-1.5-flash'
+    maxOutputTokens: 4096, // Increased
   });
   
   if (!json || typeof json !== 'object') {
@@ -155,7 +154,6 @@ CRITICAL:
   
   if (!Array.isArray(json.corrections)) json.corrections = [];
   
-  // If we found spelling errors but AI didn't include them, add them manually
   if (spellingErrors.length > 0) {
     spellingErrors.forEach(error => {
       const alreadyIncluded = json.corrections.some(c => 
@@ -174,7 +172,6 @@ CRITICAL:
       }
     });
     
-    // Also fix the correctedText if AI didn't
     let corrected = json.correctedText || text;
     spellingErrors.forEach(error => {
       const regex = new RegExp(`\\b${error.word}\\b`, 'gi');
@@ -183,7 +180,6 @@ CRITICAL:
     json.correctedText = corrected;
   }
   
-  // Ensure we have meaningful data
   if (!json.overallScore) json.overallScore = spellingErrors.length > 0 ? 70 : 85;
   if (!json.readingEase) json.readingEase = 'Moderate';
   if (!json.tone) json.tone = 'Conversational';
@@ -220,10 +216,10 @@ Return JSON with this EXACT structure:
 
 IMPORTANT: The "improved" field must contain the COMPLETE rewritten text, not just changes.`;
 
+  // Uses env default model (gemini-2.5-pro)
   const json = await generateJson(prompt, { 
     temperature: 0.4, 
-    maxOutputTokens: 2048,
-    model: 'gemini-1.5-flash'
+    maxOutputTokens: 4096,
   });
   
   if (!json || typeof json !== 'object') {
@@ -257,10 +253,10 @@ Return JSON with this EXACT structure:
 
 Make the summary informative and the bullet points specific.`;
 
+  // Uses env default model (gemini-2.5-pro)
   const json = await generateJson(prompt, { 
     temperature: 0.2, 
-    maxOutputTokens: 1024,
-    model: 'gemini-1.5-flash'
+    maxOutputTokens: 2048,
   });
   
   if (!json || typeof json !== 'object') {
@@ -288,10 +284,10 @@ Return JSON with this EXACT structure:
 
 Focus on: structure, content depth, style improvements, engagement, and clarity.`;
 
+  // Uses env default model (gemini-2.5-pro)
   const json = await generateJson(prompt, { 
     temperature: 0.35, 
-    maxOutputTokens: 1024,
-    model: 'gemini-1.5-flash'
+    maxOutputTokens: 2048,
   });
   
   if (!json || typeof json !== 'object') {
@@ -319,10 +315,11 @@ IMPORTANT:
 - Make it flow naturally from the last sentence
 - Match the writing style and tone`;
 
+  // EXPLICITLY use Flash model for auto-complete (faster, less conservative)
   const json = await generateJson(prompt, { 
+    model: MODEL_FLASH,  // <-- Uses gemini-2.5-flash instead of env default
     temperature: 0.7, 
-    maxOutputTokens: 512,
-    model: 'gemini-1.5-flash'
+    maxOutputTokens: 1024,
   });
   
   if (!json || typeof json !== 'object') {
@@ -511,9 +508,9 @@ router.post('/auto-complete', auth, async (req, res) => {
       : trimmed.length;
     
     const contextBeforeCursor = trimmed.slice(0, cursorPos);
-    const context = contextBeforeCursor.slice(-1000);
+    const context = contextBeforeCursor.slice(-5000); // Increased from 1000
     
-    console.log(`[Auto-complete] Context length: ${context.length}, Cursor: ${cursorPos}`);
+    console.log(`[Auto-complete] Using ${MODEL_FLASH} | Context length: ${context.length}, Cursor: ${cursorPos}`);
     
     const payload = await generateCompletion(context);
     console.log('[Auto-complete] Generated:', payload.completion?.length || 0, 'chars');

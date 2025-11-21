@@ -1,15 +1,8 @@
 // server/services/gemini.js
-// Default to flash (higher free tier limits) unless user specifies otherwise
-const DEFAULT_MODEL = (process.env.GEMINI_MODEL || 'gemini-2.5-flash').replace(/^models\//, '');
-const FALLBACK_MODELS = [
-  'gemini-2.5-flash', // Try flash first (higher free tier limits)
-  'gemini-2.5-pro',
-  'gemini-2.0-flash-exp',
-  'gemini-2.0-pro-exp',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
-].map((name) => name.replace(/^models\//, ''));
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-pro';
 const BASE_URL = process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com';
+
+// REMOVED: Aggressive fallback array - we trust the env var
 
 function ensureApiKey() {
   if (!process.env.GEMINI_KEY) {
@@ -24,42 +17,24 @@ function normalizeModelName(name) {
   return name.replace(/^models\//, '');
 }
 
+// Fixed: Proper API version resolution for all models
 function resolveApiVersion(modelName) {
   if (process.env.GEMINI_API_VERSION) return process.env.GEMINI_API_VERSION;
-  if ((modelName || '').includes('1.5')) return 'v1beta';
-  return 'v1';
-}
-
-function shouldFallback(err) {
-  if (!err) return false;
-  if (err.status === 404) return true;
-  if (err.code === 'NOT_FOUND') return true;
-  if (err.message?.toLowerCase().includes('not found')) return true;
-  return false;
-}
-
-async function withFallback(generate, options = {}) {
-  const tried = new Set();
-  const custom = options.model || process.env.GEMINI_MODEL;
-  const candidates = custom ? [custom, ...FALLBACK_MODELS] : [DEFAULT_MODEL, ...FALLBACK_MODELS];
-
-  let lastError;
-  for (const name of candidates) {
-    if (!name || tried.has(name)) continue;
-    tried.add(name);
-    try {
-      const normalized = normalizeModelName(name);
-      const apiVersion = resolveApiVersion(normalized);
-      console.info(`[Gemini] Attempting model "${normalized}" (apiVersion=${apiVersion})`);
-      return await generate({ ...options, model: normalized, apiVersion });
-    } catch (err) {
-      console.warn(`[Gemini] Model "${name}" failed: ${err?.message}`);
-      lastError = err;
-      if (!shouldFallback(err)) break;
-    }
+  
+  const normalized = (modelName || '').toLowerCase();
+  
+  // Models that ONLY work with v1
+  if (normalized.includes('2.5') || normalized.includes('2.0')) {
+    return 'v1';
   }
-  console.error('[Gemini] All model attempts failed', { tried: Array.from(tried) });
-  throw lastError;
+  
+  // Models that work with v1beta (1.5 series)
+  if (normalized.includes('1.5')) {
+    return 'v1beta';
+  }
+  
+  // Default to v1 for unknown models
+  return 'v1';
 }
 
 function sanitizeJsonResponse(raw) {
@@ -84,7 +59,6 @@ function sanitizeJsonResponse(raw) {
     const parsed = JSON.parse(cleaned);
     return parsed;
   } catch (err) {
-    // If parsing fails, try to return a safe fallback object
     console.warn('[Gemini] JSON parse failed, raw response:', cleaned.substring(0, 200));
     return null;
   }
@@ -95,7 +69,7 @@ function buildGenerationBody(prompt, opts = {}) {
     temperature: opts.temperature ?? 0.3,
     topP: opts.topP ?? 0.95,
     topK: opts.topK ?? 32,
-    maxOutputTokens: opts.maxOutputTokens ?? 512,
+    maxOutputTokens: opts.maxOutputTokens ?? 8192, // Increased from 512
   };
 
   return {
@@ -116,7 +90,7 @@ const geminiCallLog = [];
 function logGeminiCall(modelName, success) {
   const now = Date.now();
   geminiCallLog.push({ modelName, success, timestamp: now });
-  if (geminiCallLog.length > 200) geminiCallLog.shift(); // Keep last 200 calls
+  if (geminiCallLog.length > 200) geminiCallLog.shift();
   
   const recentCalls = geminiCallLog.filter(call => now - call.timestamp < 60000);
   console.log(`[Gemini API] Call to ${modelName} | Total calls in last minute: ${recentCalls.length}`);
@@ -128,6 +102,8 @@ async function performRequest(modelName, body, apiVersionOverride) {
   const apiVersion = apiVersionOverride || resolveApiVersion(normalizedName);
   const path = `/${apiVersion}/models/${normalizedName}:generateContent?key=${process.env.GEMINI_KEY}`;
   const url = `${BASE_URL}${path}`;
+  
+  console.log(`[Gemini] Calling ${normalizedName} via ${apiVersion}`);
   
   const startTime = Date.now();
   const res = await fetch(url, {
@@ -142,6 +118,7 @@ async function performRequest(modelName, body, apiVersionOverride) {
   } catch (err) {
     const error = new Error(`Gemini response parse failed (${res.status})`);
     error.status = res.status;
+    logGeminiCall(normalizedName, false);
     throw error;
   }
 
@@ -155,27 +132,25 @@ async function performRequest(modelName, body, apiVersionOverride) {
   }
 
   const duration = Date.now() - startTime;
+  console.log(`[Gemini] Success in ${duration}ms`);
   logGeminiCall(normalizedName, true);
   return json;
 }
 
+// SIMPLIFIED: No fallback unless explicitly needed
 async function generateText(prompt, options = {}) {
-  return withFallback(async (opts) => {
-    const modelName = normalizeModelName(opts.model || DEFAULT_MODEL);
-    const body = buildGenerationBody(prompt, opts);
-    const response = await performRequest(modelName, body, opts.apiVersion);
-    return extractTextPayload(response);
-  }, options);
+  const modelName = normalizeModelName(options.model || DEFAULT_MODEL);
+  const body = buildGenerationBody(prompt, options);
+  const response = await performRequest(modelName, body, options.apiVersion);
+  return extractTextPayload(response);
 }
 
 async function generateJson(prompt, options = {}) {
-  return withFallback(async (opts) => {
-    const modelName = normalizeModelName(opts.model || DEFAULT_MODEL);
-    const body = buildGenerationBody(prompt, opts);
-    const response = await performRequest(modelName, body, opts.apiVersion);
-    const text = extractTextPayload(response);
-    return sanitizeJsonResponse(text);
-  }, options);
+  const modelName = normalizeModelName(options.model || DEFAULT_MODEL);
+  const body = buildGenerationBody(prompt, options);
+  const response = await performRequest(modelName, body, options.apiVersion);
+  const text = extractTextPayload(response);
+  return sanitizeJsonResponse(text);
 }
 
 function getGeminiStats() {
