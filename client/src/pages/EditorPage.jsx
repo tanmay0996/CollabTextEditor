@@ -406,10 +406,43 @@ export default function EditorPage() {
   }, [saveDocument]);
 
   const handleLogout = () => {
-    removeToken();
-    navigate('/login');
-    toast.success('Logged out');
+    try {
+      // Disconnect realtime socket if active
+      try {
+        if (socketRef.current) {
+          socketRef.current.disconnect();
+          socketRef.current = null;
+        }
+      } catch (e) {
+        console.warn('Socket disconnect error', e);
+      }
+  
+      // Clear token from storage
+      clearToken();
+  
+      // Remove auth header from api client
+      if (typeof setAuthToken === 'function') {
+        try {
+          setAuthToken(null); // if your helper supports null to remove header
+        } catch (e) {
+          if (api?.defaults?.headers?.common) delete api.defaults.headers.common['Authorization'];
+        }
+      } else {
+        if (api?.defaults?.headers?.common) delete api.defaults.headers.common['Authorization'];
+      }
+  
+      // Navigate to login page
+      navigate('/login');
+      toast.success('Logged out');
+    } catch (err) {
+      console.error('Logout error', err);
+      // fallback: try to at least clear local token and navigate
+      try { clearToken(); } catch (e) {}
+      try { navigate('/login'); } catch (e) {}
+      toast.success('Logged out');
+    }
   };
+  
 
   return (
     <div className={`min-h-screen bg-gray-50 flex flex-col ${focusMode ? 'bg-gray-900' : ''}`}>

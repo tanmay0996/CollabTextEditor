@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { Toaster, toast } from 'react-hot-toast';
 import { Eye, EyeOff, Mail, Lock, Loader2, FileText } from 'lucide-react';
 import api, { setAuthToken } from '../services/api';

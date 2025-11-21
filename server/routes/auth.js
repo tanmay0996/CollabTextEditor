@@ -31,10 +31,8 @@ router.post(
       user = new User({ name: name.trim(), email: email.toLowerCase().trim(), password: hashed });
       await user.save();
 
-      const payload = { id: user._id, name: user.name, email: user.email };
-      const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
-
-      return res.status(201).json({ token, user: payload });
+      // Do NOT issue token on register per your flow. Redirect user to login on client.
+      return res.status(201).json({ ok: true, msg: 'Registration successful. Please login.' });
     } catch (err) {
       console.error('Register error', err);
       return res.status(500).json({ error: 'Server error' });
@@ -87,7 +85,7 @@ router.get('/me', authMiddleware, async (req, res) => {
 
 // POST /api/auth/logout  (stateless - client should drop token)
 router.post('/logout', authMiddleware, async (req, res) => {
-  // Optionally implement server-side blacklist here.
+  // No server-side blacklist — logout is handled on the client by removing the token.
   return res.json({ ok: true, msg: 'Logout success (client should delete token)' });
 });
 
