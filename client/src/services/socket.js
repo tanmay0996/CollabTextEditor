@@ -1,7 +1,7 @@
 // src/services/socket.js
 import { io } from 'socket.io-client';
 
-const SERVER = import.meta.env.VITE_SERVER_URL || 'http://localhost:8000';
+const SERVER = import.meta.env.VITE_REACT_APP_SERVER_URL || 'http://localhost:8000';
 let socket = null;
 
 export function createSocket(token) {
