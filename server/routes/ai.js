@@ -8,6 +8,9 @@ const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = Number(process.env.AI_RATE_LIMIT || 10);
 const MAX_TEXT_LENGTH = Number(process.env.AI_MAX_TEXT || 8000);
 
+const Typo = require('typo-js');
+const dictionary = new Typo('en_US');
+
 const rateBuckets = new Map();
 const apiCallLog = [];
 
@@ -76,41 +79,63 @@ function isTooShort(text, minLength = 15) {
 }
 
 async function generateGrammarInsights(text) {
-  const prompt = `You are an expert grammar checker and writing coach. Analyze this text thoroughly for ALL types of errors and improvements.
+  // First, do a real spell check to find actual errors using typo-js
+  const words = text.match(/\b[\w']+\b/g) || [];
+  const spellingErrors = [];
+  
+  words.forEach(word => {
+    if (!dictionary.check(word)) {
+      const suggestions = dictionary.suggest(word);
+      if (suggestions.length > 0) {
+        spellingErrors.push({
+          word: word,
+          suggestions: suggestions.slice(0, 3)
+        });
+      }
+    }
+  });
+
+  // Now tell the AI about the spelling errors we found
+  const spellingContext = spellingErrors.length > 0 
+    ? `\n\nSPELLING ERRORS DETECTED: ${spellingErrors.map(e => `"${e.word}" should be "${e.suggestions[0]}"`).join(', ')}`
+    : '';
+
+  const prompt = `You are an expert grammar and spelling checker. Analyze this text for ALL errors.
 
 Text to analyze:
 "${text}"
+${spellingContext}
 
 Find ALL issues including:
-- Spelling mistakes (even small ones like "absolutly" instead of "absolutely")
+- Spelling mistakes (I've detected some above - YOU MUST include them)
 - Grammar errors (subject-verb agreement, tense issues, etc.)
 - Punctuation problems (missing commas, incorrect apostrophes, etc.)
 - Word choice issues (wrong homophones like "their" vs "there")
-- Spacing problems (missing spaces between words)
 - Style improvements (wordiness, passive voice, clarity)
 
-Return a JSON object with this EXACT structure:
+Return JSON with this EXACT structure (NO markdown, NO backticks):
 {
-  "overallScore": <number 0-100, where lower score means more errors>,
+  "overallScore": <number 0-100, where 100 is perfect>,
   "readingEase": "<Very Easy|Easy|Moderate|Difficult|Very Difficult>",
   "tone": "<Formal|Professional|Casual|Conversational|Academic|Creative>",
+  "correctedText": "<complete text with ALL errors fixed>",
   "corrections": [
     {
-      "issue": "Specific description of what's wrong",
-      "suggestion": "The correct version",
-      "explanation": "Why this matters",
+      "original": "<exact wrong word/phrase from the text>",
+      "corrected": "<exact fixed version>",
+      "issue": "<description of what's wrong>",
+      "explanation": "<why it matters>",
       "type": "<grammar|spelling|punctuation|style|clarity|word choice>",
       "severity": "<error|warning|info>"
     }
   ]
 }
 
-IMPORTANT: 
-- Find AT LEAST 5-8 corrections if there are ANY errors
-- Mark spelling mistakes as "error" severity
-- Mark grammar issues as "error" or "warning"
-- Mark style improvements as "info"
-- Be thorough and catch even small mistakes`;
+CRITICAL:
+- If I detected spelling errors above, you MUST include them in corrections array
+- correctedText MUST have ALL errors fixed
+- For each error, provide "original" and "corrected" fields
+- Be thorough and catch all mistakes`;
 
   const json = await generateJson(prompt, { 
     temperature: 0.1, 
@@ -119,14 +144,50 @@ IMPORTANT:
   });
   
   if (!json || typeof json !== 'object') {
-    return { overallScore: 0, readingEase: 'unknown', tone: 'unknown', corrections: [] };
+    return { 
+      overallScore: 0, 
+      readingEase: 'unknown', 
+      tone: 'unknown', 
+      correctedText: text,
+      corrections: [] 
+    };
   }
+  
   if (!Array.isArray(json.corrections)) json.corrections = [];
   
+  // If we found spelling errors but AI didn't include them, add them manually
+  if (spellingErrors.length > 0) {
+    spellingErrors.forEach(error => {
+      const alreadyIncluded = json.corrections.some(c => 
+        c.original?.toLowerCase() === error.word.toLowerCase()
+      );
+      
+      if (!alreadyIncluded) {
+        json.corrections.push({
+          original: error.word,
+          corrected: error.suggestions[0],
+          issue: `Spelling error: "${error.word}" is misspelled`,
+          explanation: `The correct spelling is "${error.suggestions[0]}"`,
+          type: "spelling",
+          severity: "error"
+        });
+      }
+    });
+    
+    // Also fix the correctedText if AI didn't
+    let corrected = json.correctedText || text;
+    spellingErrors.forEach(error => {
+      const regex = new RegExp(`\\b${error.word}\\b`, 'gi');
+      corrected = corrected.replace(regex, error.suggestions[0]);
+    });
+    json.correctedText = corrected;
+  }
+  
   // Ensure we have meaningful data
-  if (!json.overallScore) json.overallScore = 50;
+  if (!json.overallScore) json.overallScore = spellingErrors.length > 0 ? 70 : 85;
   if (!json.readingEase) json.readingEase = 'Moderate';
   if (!json.tone) json.tone = 'Conversational';
+  if (!json.correctedText) json.correctedText = text;
   
   return json;
 }
