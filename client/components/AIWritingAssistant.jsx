@@ -14,9 +14,11 @@ export default function AIWritingAssistant({
   onApplyEnhancement,
   onInsertCompletion,
   selectionText,
+  onApplyGrammarFixes,
 }) {
   const completion = completionState?.data?.completion?.trim() || '';
   const improved = enhancementState?.data?.improved?.trim() || '';
+  const correctedText = grammarState?.data?.correctedText?.trim() || '';
   
   // Debug logging
   React.useEffect(() => {
@@ -42,13 +44,23 @@ export default function AIWritingAssistant({
         title="Grammar & Style"
         description="Check grammar, spelling, and tone."
         action={
-          <button
-            onClick={onCheckGrammar}
-            disabled={grammarState?.status === 'loading'}
-            className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-          >
-            {grammarState?.status === 'loading' ? 'Checking...' : 'Check'}
-          </button>
+          <div className="flex items-center gap-2">
+            {correctedText && grammarState?.data?.corrections?.length > 0 && (
+              <button
+                onClick={() => onApplyGrammarFixes?.()}
+                className="text-sm font-semibold text-green-600 hover:text-green-700 transition-colors"
+              >
+                Apply Fixes
+              </button>
+            )}
+            <button
+              onClick={onCheckGrammar}
+              disabled={grammarState?.status === 'loading'}
+              className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            >
+              {grammarState?.status === 'loading' ? 'Checking...' : 'Check'}
+            </button>
+          </div>
         }
       >
         {grammarState?.error && (
@@ -69,7 +81,7 @@ export default function AIWritingAssistant({
                 </span>
               </div>
             )}
-            <ul className="space-y-3">
+            <ul className="space-y-3 max-h-80 overflow-y-auto">
               {grammarState.data.corrections.map((item, idx) => (
                 <li key={`${item.issue}-${idx}`} className="p-3 border border-gray-100 rounded-xl bg-gray-50">
                   <div className="flex items-center justify-between mb-1">
@@ -87,9 +99,21 @@ export default function AIWritingAssistant({
                     </span>
                   </div>
                   <p className="text-sm text-gray-800 font-medium">{item.issue}</p>
-                  <p className="text-sm text-emerald-700 mt-1.5">
-                    <span className="font-semibold">→</span> {item.suggestion}
-                  </p>
+                  {item.original && item.corrected && (
+                    <div className="mt-2 text-sm">
+                      <p className="text-red-600">
+                        <span className="font-semibold">Wrong:</span> <span className="line-through">{item.original}</span>
+                      </p>
+                      <p className="text-green-600">
+                        <span className="font-semibold">Fix:</span> {item.corrected}
+                      </p>
+                    </div>
+                  )}
+                  {!item.original && item.suggestion && (
+                    <p className="text-sm text-emerald-700 mt-1.5">
+                      <span className="font-semibold">→</span> {item.suggestion}
+                    </p>
+                  )}
                   {item.explanation && (
                     <p className="text-xs text-gray-500 mt-1 italic">{item.explanation}</p>
                   )}

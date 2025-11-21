@@ -216,6 +216,23 @@ export default function EditorPage() {
     setEnhancementState({ status: 'idle', data: null, error: null });
   }, [editor, showToast]);
 
+  // Add this new function after the applyEnhancedText function
+const applyGrammarFixes = useCallback(() => {
+  if (!editor || !grammarState.data?.correctedText) return;
+  
+  // Replace entire document content with corrected text
+  applyingRemoteRef.current = true;
+  editor.chain().focus().clearContent().insertContent(grammarState.data.correctedText).run();
+  applyingRemoteRef.current = false;
+  
+  showToast('Grammar fixes applied successfully!', 'info');
+  
+  // Clear grammar state after applying
+  setGrammarState({ status: 'idle', data: null, error: null });
+}, [editor, grammarState.data, showToast]);
+
+// Then pass it to the AIWritingAssistant component
+
   const insertCompletion = useCallback((text) => {
     if (!editor || !text) return;
     editor.chain().focus().insertContent(text).run();
@@ -407,6 +424,7 @@ export default function EditorPage() {
           onGetSuggestions={getSuggestions}
           onGetCompletion={getCompletion}
           onApplyEnhancement={applyEnhancedText}
+          onApplyGrammarFixes={applyGrammarFixes} 
           onInsertCompletion={insertCompletion}
           selectionText={selectionText}
         />
