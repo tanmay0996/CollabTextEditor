@@ -1,320 +1,496 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { 
+  CheckCircle2, XCircle, RefreshCw, Copy, Download, Info,
+  Sparkles, BookOpen, Wand2, MessageSquare, Lightbulb, 
+  ChevronDown, ChevronUp, AlertCircle, Check, X
+} from 'lucide-react';
+
+const tabs = [
+  { id: 'grammar', label: 'Grammar', icon: CheckCircle2 },
+  { id: 'enhance', label: 'Enhance', icon: Wand2 },
+  { id: 'summary', label: 'Summary', icon: BookOpen },
+  { id: 'complete', label: 'Complete', icon: Sparkles },
+  { id: 'suggest', label: 'Ideas', icon: Lightbulb },
+];
 
 export default function AIWritingAssistant({
-  grammarState,
-  enhancementState,
-  summaryState,
-  completionState,
-  suggestionsState,
-  onCheckGrammar,
-  onEnhanceText,
-  onGenerateSummary,
-  onGetSuggestions,
-  onGetCompletion,
-  onApplyEnhancement,
-  onInsertCompletion,
+  grammarState, enhancementState, summaryState, completionState, suggestionsState,
+  onCheckGrammar, onEnhanceText, onGenerateSummary, onGetSuggestions, onGetCompletion,
+  onApplyEnhancement, onApplyGrammarFix, onApplyAllGrammarFixes, onInsertCompletion,
+  onCopySummary, onInsertSummary, onRegenerateSummary, onRegenerateEnhancement,
+  // NEW handlers (parent should pass these)
+  onDismissGrammar,            // (index) => void
+  onDeclineEnhancement,        // () => void
+  onDeclineCompletion,         // () => void
+  onDeclineSummary,            // () => void
+  onDismissSuggestion,         // (index) => void
+  onApplySuggestion,           // (idea, index) => void
   selectionText,
-  onApplyGrammarFixes,
 }) {
-  const completion = completionState?.data?.completion?.trim() || '';
-  const improved = enhancementState?.data?.improved?.trim() || '';
-  const correctedText = grammarState?.data?.correctedText?.trim() || '';
-  
-  // Debug logging
-  React.useEffect(() => {
-    if (completionState?.data) {
-      console.log('[AI Assistant] Completion data:', completionState.data);
+  const [activeTab, setActiveTab] = useState('grammar');
+  // Keep small local UI sets for fast instant UI feedback — parent will be the source of truth.
+  const [dismissedCorrections, setDismissedCorrections] = useState(new Set());
+  const [dismissedSuggestions, setDismissedSuggestions] = useState(new Set());
+  const [expandedItems, setExpandedItems] = useState(new Set());
+
+  const toggleExpand = (id) => {
+    const newSet = new Set(expandedItems);
+    newSet.has(id) ? newSet.delete(id) : newSet.add(id);
+    setExpandedItems(newSet);
+  };
+
+  // local dismissed marking (but call parent after)
+  const dismissCorrectionLocal = (idx) => {
+    setDismissedCorrections(new Set([...dismissedCorrections, idx]));
+    if (typeof onDismissGrammar === 'function') onDismissGrammar(idx);
+  };
+
+  const dismissAllCorrections = () => {
+    const all = grammarState.data?.corrections?.map((_, i) => i) || [];
+    setDismissedCorrections(new Set(all));
+    if (typeof onDismissGrammar === 'function') {
+      all.forEach((i) => onDismissGrammar(i));
     }
-  }, [completionState]);
-  
-  React.useEffect(() => {
-    if (suggestionsState?.data) {
-      console.log('[AI Assistant] Suggestions data:', suggestionsState.data);
-    }
-  }, [suggestionsState]);
+  };
+
+  const dismissSuggestionLocal = (idx) => {
+    setDismissedSuggestions(new Set([...dismissedSuggestions, idx]));
+    if (typeof onDismissSuggestion === 'function') onDismissSuggestion(idx);
+  };
+
+  const visibleCorrections = (grammarState.data?.corrections || []).filter((_, i) => !dismissedCorrections.has(i));
+  const visibleSuggestions = (suggestionsState.data?.ideas || []).filter((_, i) => !dismissedSuggestions.has(i));
 
   return (
-    <aside className="bg-white border border-gray-200 rounded-2xl shadow-sm p-4 space-y-4 lg:w-96">
-      <header className="border-b border-gray-100 pb-3">
-        <p className="text-xs uppercase tracking-wide text-indigo-500 font-semibold">AI Writing Assistant</p>
-        <p className="text-sm text-gray-500 mt-1">Click buttons to generate insights</p>
-      </header>
-
-      <PanelCard
-        title="Grammar & Style"
-        description="Check grammar, spelling, and tone."
-        action={
-          <div className="flex items-center gap-2">
-            {correctedText && grammarState?.data?.corrections?.length > 0 && (
-              <button
-                onClick={() => onApplyGrammarFixes?.()}
-                className="text-sm font-semibold text-green-600 hover:text-green-700 transition-colors"
-              >
-                Apply Fixes
-              </button>
-            )}
+    <div className="flex flex-col h-full">
+      {/* Tab Navigation */}
+      <div className="flex border-b border-gray-200 bg-gray-50 px-2">
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
             <button
-              onClick={onCheckGrammar}
-              disabled={grammarState?.status === 'loading'}
-              className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 flex flex-col items-center gap-1 py-3 px-2 text-xs font-medium transition-colors border-b-2 ${
+                isActive 
+                  ? 'border-blue-600 text-blue-600 bg-white' 
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+              }`}
             >
-              {grammarState?.status === 'loading' ? 'Checking...' : 'Check'}
+              <Icon className="w-4 h-4" />
+              <span>{tab.label}</span>
             </button>
-          </div>
-        }
-      >
-        {grammarState?.error && (
-          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
-            <p className="font-medium">ℹ️ {grammarState.error}</p>
+          );
+        })}
+      </div>
+
+      {/* Tab Content */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {/* Grammar Tab */}
+        {activeTab === 'grammar' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900">Grammar & Style Check</h3>
+              <button onClick={onCheckGrammar} disabled={grammarState.status === 'loading'} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+                {grammarState.status === 'loading' ? (
+                  <><RefreshCw className="w-4 h-4 animate-spin" /> Checking...</>
+                ) : (
+                  <><CheckCircle2 className="w-4 h-4" /> Check</>
+                )}
+              </button>
+            </div>
+
+            {grammarState.status === 'loading' && <LoadingSkeleton lines={4} />}
+            
+            {grammarState.error && <ErrorMessage message={grammarState.error} />}
+
+            {grammarState.status === 'ready' && visibleCorrections.length > 0 && (
+              <>
+                {/* Overall Score */}
+                {grammarState.data.overallScore !== undefined && (
+                  <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
+                    <span className="text-sm font-medium text-gray-600">Overall Score</span>
+                    <ScoreBadge score={grammarState.data.overallScore} />
+                  </div>
+                )}
+
+                {/* Bulk Actions */}
+                <div className="flex gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
+                  <button onClick={onApplyAllGrammarFixes} className="flex-1 flex items-center justify-center gap-2 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors">
+                    <Check className="w-4 h-4" /> Accept All
+                  </button>
+                  <button onClick={dismissAllCorrections} className="flex-1 flex items-center justify-center gap-2 py-2 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors">
+                    <X className="w-4 h-4" /> Decline All
+                  </button>
+                </div>
+
+                {/* Corrections List */}
+                <div className="space-y-3">
+                  {visibleCorrections.map((item, idx) => {
+                    // Find original index in full corrections array (so parent can remove by index)
+                    const originalIndex = grammarState.data.corrections.indexOf(item);
+                    return (
+                      <GrammarCorrectionCard
+                        key={`${item.issue}-${originalIndex}-${idx}`}
+                        item={item}
+                        onAccept={() => {
+                          // call parent to apply AND remove (parent will update grammarState)
+                          onApplyGrammarFix?.(item, originalIndex);
+                          // also mark locally dismissed for instant UI feedback
+                          setDismissedCorrections(new Set([...dismissedCorrections, originalIndex]));
+                        }}
+                        onDecline={() => dismissCorrectionLocal(originalIndex)}
+                        expanded={expandedItems.has(`grammar-${originalIndex}`)}
+                        onToggleExpand={() => toggleExpand(`grammar-${originalIndex}`)}
+                      />
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {grammarState.status === 'ready' && visibleCorrections.length === 0 && (
+              <SuccessMessage message="No grammar issues found! Your writing looks great." />
+            )}
+
+            {grammarState.status === 'idle' && <EmptyState icon={CheckCircle2} text="Click 'Check' to analyze your writing for grammar and style issues." />}
           </div>
         )}
-        {grammarState?.data?.corrections?.length ? (
-          <div className="space-y-3">
-            {grammarState.data.overallScore !== undefined && (
-              <div className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
-                <span className="text-xs font-medium text-gray-600">Overall Score</span>
-                <span className={`text-sm font-bold ${
-                  grammarState.data.overallScore >= 80 ? 'text-green-600' :
-                  grammarState.data.overallScore >= 60 ? 'text-amber-600' : 'text-red-600'
-                }`}>
-                  {grammarState.data.overallScore}/100
-                </span>
+
+        {/* Enhancement Tab */}
+        {activeTab === 'enhance' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-gray-900">Text Enhancement</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {selectionText ? 'Enhancing selected text' : 'Enhancing entire document'}
+                </p>
               </div>
-            )}
-            <ul className="space-y-3 max-h-80 overflow-y-auto">
-              {grammarState.data.corrections.map((item, idx) => (
-                <li key={`${item.issue}-${idx}`} className="p-3 border border-gray-100 rounded-xl bg-gray-50">
-                  <div className="flex items-center justify-between mb-1">
-                    <p className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
-                      {item.type || 'ISSUE'}
-                    </p>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                      item.severity === 'error'
-                        ? 'bg-red-100 text-red-700'
-                        : item.severity === 'warning'
-                          ? 'bg-amber-100 text-amber-700'
-                          : 'bg-blue-100 text-blue-700'
-                    }`}>
-                      {item.severity || 'info'}
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-800 font-medium">{item.issue}</p>
-                  {item.original && item.corrected && (
-                    <div className="mt-2 text-sm">
-                      <p className="text-red-600">
-                        <span className="font-semibold">Wrong:</span> <span className="line-through">{item.original}</span>
-                      </p>
-                      <p className="text-green-600">
-                        <span className="font-semibold">Fix:</span> {item.corrected}
-                      </p>
+              <button onClick={onEnhanceText} disabled={enhancementState.status === 'loading'} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+                {enhancementState.status === 'loading' ? (
+                  <><RefreshCw className="w-4 h-4 animate-spin" /> Enhancing...</>
+                ) : (
+                  <><Wand2 className="w-4 h-4" /> Enhance</>
+                )}
+              </button>
+            </div>
+
+            {enhancementState.status === 'loading' && <LoadingSkeleton lines={6} />}
+            
+            {enhancementState.error && <ErrorMessage message={enhancementState.error} />}
+
+            {enhancementState.status === 'ready' && enhancementState.data?.improved && (
+              <div className="space-y-3">
+                {/* Side by Side Comparison */}
+                <div className="grid grid-cols-1 gap-3">
+                  {selectionText && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-xs font-medium text-red-700 mb-1">Original</p>
+                      <p className="text-sm text-red-900">{selectionText}</p>
                     </div>
                   )}
-                  {!item.original && item.suggestion && (
-                    <p className="text-sm text-emerald-700 mt-1.5">
-                      <span className="font-semibold">→</span> {item.suggestion}
-                    </p>
-                  )}
-                  {item.explanation && (
-                    <p className="text-xs text-gray-500 mt-1 italic">{item.explanation}</p>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : grammarState?.status === 'ready' ? (
-          <div className="p-4 text-center bg-green-50 rounded-xl border border-green-100">
-            <p className="text-2xl mb-1">✓</p>
-            <p className="text-sm font-medium text-green-700">No issues detected!</p>
-          </div>
-        ) : grammarState?.status === 'empty' ? (
-          <EmptyState text="Start typing to check grammar." />
-        ) : (
-          <EmptyState text="Click 'Check' to analyze grammar." />
-        )}
-      </PanelCard>
+                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <p className="text-xs font-medium text-green-700 mb-1">Enhanced</p>
+                    <p className="text-sm text-green-900 whitespace-pre-wrap">{enhancementState.data.improved}</p>
+                  </div>
+                </div>
 
-      <PanelCard
-        title="Text Enhancement"
-        description={selectionText ? 'Rewrite the highlighted selection.' : 'Improve the overall passage.'}
-        action={
-          <div className="flex items-center gap-2">
-            {improved && (
-              <button
-                onClick={() => onApplyEnhancement?.(improved)}
-                className="text-sm font-semibold text-green-600 hover:text-green-700 transition-colors"
-              >
-                Apply
+                {enhancementState.data.rationale && (
+                  <p className="text-xs text-gray-500 italic px-1">💡 {enhancementState.data.rationale}</p>
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex gap-2">
+                  <button onClick={() => { onApplyEnhancement?.(enhancementState.data.improved); /* parent will clear state */ }} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors">
+                    <Check className="w-4 h-4" /> Accept
+                  </button>
+                  <button onClick={() => { onDeclineEnhancement?.(); setDismissedCorrections(new Set()); }} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors">
+                    <X className="w-4 h-4" /> Decline
+                  </button>
+                  <button onClick={onRegenerateEnhancement} className="px-4 py-2.5 bg-blue-100 text-blue-700 text-sm font-medium rounded-lg hover:bg-blue-200 transition-colors">
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {enhancementState.status === 'idle' && <EmptyState icon={Wand2} text="Select text or click 'Enhance' to improve your writing style and clarity." />}
+          </div>
+        )}
+
+        {/* Summary Tab */}
+        {activeTab === 'summary' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900">Content Summary</h3>
+              <button onClick={onGenerateSummary} disabled={summaryState.status === 'loading'} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+                {summaryState.status === 'loading' ? (
+                  <><RefreshCw className="w-4 h-4 animate-spin" /> Generating...</>
+                ) : (
+                  <><BookOpen className="w-4 h-4" /> Summarize</>
+                )}
               </button>
-            )}
-            <button
-              onClick={onEnhanceText}
-              disabled={enhancementState?.status === 'loading'}
-              className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-            >
-              {enhancementState?.status === 'loading' ? 'Enhancing...' : 'Enhance'}
-            </button>
-          </div>
-        }
-      >
-        {enhancementState?.error && (
-          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
-            <p className="font-medium">ℹ️ {enhancementState.error}</p>
-          </div>
-        )}
-        {improved ? (
-          <div className="space-y-3">
-            <div className="p-3 bg-white border border-gray-200 rounded-xl">
-              <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{improved}</p>
             </div>
-            {enhancementState?.data?.rationale && (
-              <p className="text-xs text-gray-500 italic">💡 {enhancementState.data.rationale}</p>
-            )}
-          </div>
-        ) : enhancementState?.status === 'empty' ? (
-          <EmptyState text="Start typing to get enhancements." />
-        ) : (
-          <EmptyState text="Click 'Enhance' to improve text." />
-        )}
-      </PanelCard>
 
-      <PanelCard 
-        title="Content Summary" 
-        description="Quick recap for collaborators."
-        action={
-          <button
-            onClick={onGenerateSummary}
-            disabled={summaryState?.status === 'loading'}
-            className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-          >
-            {summaryState?.status === 'loading' ? 'Summarizing...' : 'Summarize'}
-          </button>
-        }
-      >
-        {summaryState?.error && (
-          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
-            <p className="font-medium">ℹ️ {summaryState.error}</p>
-          </div>
-        )}
-        {summaryState?.data?.summary ? (
-          <div className="space-y-3">
-            <div className="p-3 bg-white border border-gray-200 rounded-xl">
-              <p className="text-sm text-gray-800 leading-relaxed">{summaryState.data.summary}</p>
-            </div>
-            {summaryState.data.bullets?.length > 0 && (
-              <ul className="space-y-1.5 text-sm text-gray-700">
-                {summaryState.data.bullets.map((bullet, idx) => (
-                  <li key={idx} className="flex items-start gap-2">
-                    <span className="text-indigo-500 font-bold mt-0.5">•</span>
-                    <span>{bullet}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ) : summaryState?.status === 'empty' ? (
-          <EmptyState text="Start typing to generate a summary." />
-        ) : (
-          <EmptyState text="Click 'Summarize' to create a summary." />
-        )}
-      </PanelCard>
+            {summaryState.status === 'loading' && <LoadingSkeleton lines={5} />}
+            
+            {summaryState.error && <ErrorMessage message={summaryState.error} />}
 
-      <PanelCard
-        title="Smart Auto-complete"
-        description="Generate text continuation."
-        action={
-          <div className="flex items-center gap-2">
-            {completion && (
-              <button
-                onClick={() => onInsertCompletion?.(completion)}
-                className="text-sm font-semibold text-green-600 hover:text-green-700 transition-colors"
-              >
-                Insert
+            {summaryState.status === 'ready' && summaryState.data?.summary && (
+              <div className="space-y-3">
+                <div className="p-4 bg-white border border-gray-200 rounded-lg">
+                  <p className="text-sm text-gray-800 leading-relaxed">{summaryState.data.summary}</p>
+                  {summaryState.data.bullets?.length > 0 && (
+                    <ul className="mt-3 space-y-1.5 text-sm text-gray-700">
+                      {summaryState.data.bullets.map((bullet, i) => (
+                        <li key={i} className="flex items-start gap-2">
+                          <span className="text-blue-600 font-bold mt-0.5">•</span>
+                          <span>{bullet}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-2">
+                  <button onClick={onCopySummary} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
+                    <Copy className="w-4 h-4" /> Copy
+                  </button>
+                  <button onClick={onInsertSummary} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors">
+                    <Download className="w-4 h-4" /> Insert
+                  </button>
+                  <button onClick={() => { onDeclineSummary?.(); }} className="flex items-center gap-2 px-4 py-2.5 bg-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-300 transition-colors">
+                    <X className="w-4 h-4" /> Decline
+                  </button>
+                  <button onClick={onRegenerateSummary} className="px-4 py-2.5 bg-blue-100 text-blue-700 text-sm font-medium rounded-lg hover:bg-blue-200 transition-colors">
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {summaryState.status === 'idle' && <EmptyState icon={BookOpen} text="Click 'Summarize' to generate a quick recap of your content." />}
+          </div>
+        )}
+
+        {/* Auto-Complete Tab */}
+        {activeTab === 'complete' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900">Smart Auto-Complete</h3>
+              <button onClick={onGetCompletion} disabled={completionState.status === 'loading'} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+                {completionState.status === 'loading' ? (
+                  <><RefreshCw className="w-4 h-4 animate-spin" /> Generating...</>
+                ) : (
+                  <><Sparkles className="w-4 h-4" /> Complete</>
+                )}
               </button>
+            </div>
+
+            {completionState.status === 'loading' && <LoadingSkeleton lines={3} />}
+            
+            {completionState.error && <ErrorMessage message={completionState.error} />}
+
+            {completionState.status === 'ready' && completionState.data?.completion && (
+              <div className="space-y-3">
+                <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                  <p className="text-sm text-gray-600 italic leading-relaxed">{completionState.data.completion}</p>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-gray-500 px-1">
+                  <span>Press <kbd className="px-1.5 py-0.5 bg-gray-200 rounded text-gray-700 font-mono">Tab</kbd> to accept</span>
+                  <span><kbd className="px-1.5 py-0.5 bg-gray-200 rounded text-gray-700 font-mono">Esc</kbd> to decline</span>
+                </div>
+
+                <div className="flex gap-2">
+                  <button onClick={() => { onInsertCompletion?.(completionState.data.completion); }} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors">
+                    <Check className="w-4 h-4" /> Accept
+                  </button>
+                  <button onClick={() => { onDeclineCompletion?.(); }} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-gray-600 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors">
+                    <X className="w-4 h-4" /> Decline
+                  </button>
+                </div>
+              </div>
             )}
-            <button
-              onClick={onGetCompletion}
-              disabled={completionState?.status === 'loading'}
-              className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-            >
-              {completionState?.status === 'loading' ? 'Generating...' : 'Complete'}
-            </button>
-          </div>
-        }
-      >
-        {completionState?.error && (
-          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
-            <p className="font-medium">ℹ️ {completionState.error}</p>
-          </div>
-        )}
-        {completion ? (
-          <div className="p-3 bg-white border border-gray-200 rounded-xl">
-            <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{completion}</p>
-          </div>
-        ) : completionState?.status === 'empty' ? (
-          <EmptyState text="Start typing to get completions." />
-        ) : (
-          <EmptyState text="Click 'Complete' to continue writing." />
-        )}
-      </PanelCard>
 
-      <PanelCard 
-        title="Writing Suggestions" 
-        description="Get tactical recommendations."
-        action={
-          <button
-            onClick={onGetSuggestions}
-            disabled={suggestionsState?.status === 'loading'}
-            className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-          >
-            {suggestionsState?.status === 'loading' ? 'Loading...' : 'Get Ideas'}
-          </button>
-        }
-      >
-        {suggestionsState?.error && (
-          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
-            <p className="font-medium">ℹ️ {suggestionsState.error}</p>
+            {completionState.status === 'idle' && <EmptyState icon={Sparkles} text="Click 'Complete' to generate text continuation based on your writing." />}
           </div>
         )}
-        {suggestionsState?.data?.ideas?.length ? (
-          <ul className="space-y-2">
-            {suggestionsState.data.ideas.map((idea, idx) => (
-              <li key={`${idea.title}-${idx}`} className="p-3 rounded-xl border border-gray-100 bg-white hover:border-indigo-100 transition-colors">
-                <p className="text-sm font-semibold text-gray-900 mb-1">💡 {idea.title}</p>
-                <p className="text-sm text-gray-600 leading-relaxed">{idea.detail}</p>
-              </li>
-            ))}
-          </ul>
-        ) : suggestionsState?.status === 'empty' ? (
-          <EmptyState text="Start typing to get suggestions." />
-        ) : (
-          <EmptyState text="Click 'Get Ideas' for recommendations." />
-        )}
-      </PanelCard>
-    </aside>
-  );
-}
 
-function PanelCard({ title, description, children, action }) {
-  return (
-    <section className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-semibold text-gray-900">{title}</p>
-          <p className="text-xs text-gray-500">{description}</p>
-        </div>
-        {action}
+        {/* Suggestions Tab */}
+        {activeTab === 'suggest' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900">Writing Suggestions</h3>
+              <button onClick={onGetSuggestions} disabled={suggestionsState.status === 'loading'} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2">
+                {suggestionsState.status === 'loading' ? (
+                  <><RefreshCw className="w-4 h-4 animate-spin" /> Loading...</>
+                ) : (
+                  <><Lightbulb className="w-4 h-4" /> Get Ideas</>
+                )}
+              </button>
+            </div>
+
+            {suggestionsState.status === 'loading' && <LoadingSkeleton lines={4} />}
+            
+            {suggestionsState.error && <ErrorMessage message={suggestionsState.error} />}
+
+            {suggestionsState.status === 'ready' && visibleSuggestions.length > 0 && (
+              <div className="space-y-3">
+                {visibleSuggestions.map((idea, idx) => {
+                  // get original index in full ideas array (for parent)
+                  const originalIndex = suggestionsState.data.ideas.indexOf(idea);
+                  return (
+                    <SuggestionCard
+                      key={`${idea.title}-${originalIndex}-${idx}`}
+                      idea={idea}
+                      onApply={() => {
+                        onApplySuggestion?.(idea, originalIndex);
+                        setDismissedSuggestions(new Set([...dismissedSuggestions, originalIndex]));
+                      }}
+                      onDismiss={() => dismissSuggestionLocal(originalIndex)}
+                      onMoreInfo={() => toggleExpand(`suggestion-${originalIndex}`)}
+                      expanded={expandedItems.has(`suggestion-${originalIndex}`)}
+                    />
+                  );
+                })}
+              </div>
+            )}
+
+            {suggestionsState.status === 'idle' && <EmptyState icon={Lightbulb} text="Click 'Get Ideas' to receive tactical writing recommendations." />}
+
+            {suggestionsState.status === 'ready' && visibleSuggestions.length === 0 && (
+              <SuccessMessage message="No suggestions left." />
+            )}
+          </div>
+        )}
       </div>
-      <div className="border border-gray-100 rounded-2xl p-3 bg-gray-50">
-        {children}
-      </div>
-    </section>
-  );
-}
-
-function EmptyState({ text }) {
-  return (
-    <div className="text-center py-6">
-      <p className="text-sm text-gray-400">{text}</p>
     </div>
+  );
+}
+
+// Sub-components
+function GrammarCorrectionCard({ item, onAccept, onDecline, expanded, onToggleExpand }) {
+  const severityColors = {
+    error: 'bg-red-100 text-red-700 border-red-200',
+    warning: 'bg-amber-100 text-amber-700 border-amber-200',
+    info: 'bg-blue-100 text-blue-700 border-blue-200',
+  };
+
+  return (
+    <div className="p-3 bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${severityColors[item.severity] || severityColors.info}`}>
+          {item.type || 'Grammar'}
+        </span>
+        <button onClick={onToggleExpand} className="text-gray-400 hover:text-gray-600">
+          {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
+      </div>
+      
+      <p className="text-sm text-gray-800 font-medium mb-2">{item.issue}</p>
+      
+      {item.original && item.corrected && (
+        <div className="space-y-1 text-sm mb-3">
+          <p className="flex items-center gap-2">
+            <span className="w-2 h-2 bg-red-500 rounded-full"></span>
+            <span className="line-through text-red-600">{item.original}</span>
+          </p>
+          <p className="flex items-center gap-2">
+            <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+            <span className="text-green-600 font-medium">{item.corrected}</span>
+          </p>
+        </div>
+      )}
+
+      {expanded && item.explanation && (
+        <p className="text-xs text-gray-500 mb-3 p-2 bg-gray-50 rounded-lg">{item.explanation}</p>
+      )}
+
+      <div className="flex gap-2">
+        <button onClick={onAccept} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors">
+          <Check className="w-3.5 h-3.5" /> Accept
+        </button>
+        <button onClick={onDecline} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-gray-200 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-300 transition-colors">
+          <X className="w-3.5 h-3.5" /> Decline
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SuggestionCard({ idea, onApply, onDismiss, onMoreInfo, expanded }) {
+  return (
+    <div className="p-3 bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow">
+      <p className="text-sm font-semibold text-gray-900 mb-1 flex items-center gap-2">
+        <Lightbulb className="w-4 h-4 text-amber-500" />
+        {idea.title}
+      </p>
+      <p className={`text-sm text-gray-600 leading-relaxed ${expanded ? '' : 'line-clamp-2'}`}>{idea.detail}</p>
+      
+      <div className="flex gap-2 mt-3">
+        <button onClick={onApply} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors">
+          <Check className="w-3.5 h-3.5" /> Apply
+        </button>
+        <button onClick={onDismiss} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-300 transition-colors">
+          <X className="w-3.5 h-3.5" /> Dismiss
+        </button>
+        <button onClick={onMoreInfo} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 text-xs font-medium rounded-lg hover:bg-blue-200 transition-colors">
+          <Info className="w-3.5 h-3.5" /> {expanded ? 'Less' : 'More'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LoadingSkeleton({ lines = 3 }) {
+  return (
+    <div className="space-y-3 animate-pulse">
+      {Array.from({ length: lines }).map((_, i) => (
+        <div key={i} className="h-4 bg-gray-200 rounded" style={{ width: `${70 + Math.random() * 30}%` }}></div>
+      ))}
+    </div>
+  );
+}
+
+function EmptyState({ icon: Icon, text }) {
+  return (
+    <div className="text-center py-8 px-4">
+      <Icon className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+      <p className="text-sm text-gray-500">{text}</p>
+    </div>
+  );
+}
+
+function ErrorMessage({ message }) {
+  return (
+    <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+      <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+      <p className="text-sm text-amber-800">{message}</p>
+    </div>
+  );
+}
+
+function SuccessMessage({ message }) {
+  return (
+    <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-xl">
+      <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+        <Check className="w-5 h-5 text-green-600" />
+      </div>
+      <p className="text-sm font-medium text-green-700">{message}</p>
+    </div>
+  );
+}
+
+function ScoreBadge({ score }) {
+  const color = score >= 80 ? 'text-green-600' : score >= 60 ? 'text-amber-600' : 'text-red-600';
+  const bg = score >= 80 ? 'bg-green-100' : score >= 60 ? 'bg-amber-100' : 'bg-red-100';
+  return (
+    <span className={`text-lg font-bold ${color} ${bg} px-3 py-1 rounded-full`}>
+      {score}/100
+    </span>
   );
 }

@@ -1,65 +1,58 @@
-// client/src/pages/EditorPage.jsx
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import { Toaster, toast } from 'react-hot-toast';
+import { 
+  Menu, X, Save, Eye, EyeOff, ChevronDown, User, LogOut, 
+  FileText, Sparkles, PanelRightClose, PanelRight
+} from 'lucide-react';
 import api, { setAuthToken } from '../services/api';
-import { getToken } from '../utils/auth';
+import { getToken, clearToken } from '../utils/auth';
 import { createSocket } from '../services/socket';
 import AIWritingAssistant from '../../components/AIWritingAssistant';
 
-// Simple toast notification component
-function Toast({ message, type = 'info', onClose }) {
-  useEffect(() => {
-    const timer = setTimeout(onClose, 4000);
-    return () => clearTimeout(timer);
-  }, [onClose]);
-
-  const bgColor = type === 'error' ? 'bg-red-500' : type === 'warning' ? 'bg-amber-500' : 'bg-blue-500';
-
-  return (
-    <div className={`fixed top-4 right-4 ${bgColor} text-white px-4 py-3 rounded-lg shadow-lg max-w-sm z-50 animate-fade-in`}>
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-sm">{message}</p>
-        <button onClick={onClose} className="text-white hover:text-gray-200 font-bold">×</button>
-      </div>
-    </div>
-  );
-}
-
 export default function EditorPage() {
   const { id: documentId } = useParams();
+  const navigate = useNavigate();
   const [status, setStatus] = useState('loading');
+  const [docTitle, setDocTitle] = useState('Untitled Document');
+  const [wordCount, setWordCount] = useState(0);
+  const [lastSaved, setLastSaved] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  
+  // AI States
   const [grammarState, setGrammarState] = useState({ status: 'idle', data: null, error: null });
   const [enhancementState, setEnhancementState] = useState({ status: 'idle', data: null, error: null });
   const [summaryState, setSummaryState] = useState({ status: 'idle', data: null, error: null });
   const [completionState, setCompletionState] = useState({ status: 'idle', data: null, error: null });
   const [suggestionsState, setSuggestionsState] = useState({ status: 'idle', data: null, error: null });
   const [selectionText, setSelectionText] = useState('');
-  const [toast, setToast] = useState(null);
   
   const editorRef = useRef(null);
   const socketRef = useRef(null);
   const applyingRemoteRef = useRef(false);
   const selectionRef = useRef('');
 
-  const showToast = useCallback((message, type = 'info') => {
-    setToast({ message, type, id: Date.now() });
-  }, []);
-
   const editor = useEditor({
     extensions: [StarterKit],
     content: '',
     autofocus: true,
-    onUpdate: ({ editor, transaction }) => {
+    onUpdate: ({ editor }) => {
       if (applyingRemoteRef.current) return;
-
+      // Update word count
+      const text = editor.getText();
+      const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+      setWordCount(words);
+      // Throttled emit
       const now = Date.now();
       if (!editorRef.current) editorRef.current = { lastSent: 0 };
-      const lastSent = editorRef.current.lastSent || 0;
-      if (now - lastSent < 300) return;
+      if (now - editorRef.current.lastSent < 300) return;
       editorRef.current.lastSent = now;
-
       try {
         const json = editor.getJSON();
         if (socketRef.current?.connected) {
@@ -72,176 +65,250 @@ export default function EditorPage() {
   });
 
   const handleApiError = useCallback((err, setStateFunc, fallbackMessage) => {
-    console.error('API error:', err);
-    
     const errorData = err?.response?.data;
     const userMessage = errorData?.userMessage || errorData?.error || err.message || fallbackMessage;
-    
     setStateFunc({ status: 'error', data: null, error: userMessage });
-    showToast(userMessage, 'warning');
-  }, [showToast]);
+    toast.error(userMessage);
+  }, []);
 
+  // Manual save
+  const saveDocument = useCallback(async () => {
+    if (!editor) return;
+    setIsSaving(true);
+    try {
+      const json = editor.getJSON();
+      await api.put(`/documents/${documentId}`, { data: json, title: docTitle });
+      setLastSaved(new Date());
+      toast.success('Document saved');
+    } catch (err) {
+      toast.error('Failed to save document');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [editor, documentId, docTitle]);
+
+  // AI Functions
   const checkGrammar = useCallback(async () => {
     if (!editor) return;
     const plain = editor.getText();
-    
     if (!plain.trim()) {
-      setGrammarState({ status: 'empty', data: null, error: null });
-      showToast('Please write some text to check grammar.', 'info');
+      toast('Please write some text first', { icon: 'ℹ️' });
       return;
     }
-
     setGrammarState({ status: 'loading', data: null, error: null });
-
+    toast.loading('Checking grammar...', { id: 'grammar' });
     try {
       const res = await api.post('/ai/grammar-check', { text: plain });
       setGrammarState({ status: 'ready', data: res.data, error: null });
-      
-      if (res.data.corrections?.length === 0) {
-        showToast('Great! No grammar issues found.', 'info');
-      } else {
-        showToast(`Found ${res.data.corrections?.length || 0} suggestions for improvement.`, 'info');
-      }
+      toast.success(`Found ${res.data.corrections?.length || 0} suggestions`, { id: 'grammar' });
     } catch (err) {
       handleApiError(err, setGrammarState, 'Grammar check failed');
+      toast.error('Grammar check failed', { id: 'grammar' });
     }
-  }, [editor, showToast, handleApiError]);
+  }, [editor, handleApiError]);
 
   const enhanceText = useCallback(async () => {
     if (!editor) return;
     const plain = editor.getText();
     const selection = selectionRef.current;
-
     if (!plain.trim()) {
-      setEnhancementState({ status: 'empty', data: null, error: null });
-      showToast('Please write some text to enhance.', 'info');
+      toast('Please write some text first', { icon: 'ℹ️' });
       return;
     }
-
     setEnhancementState({ status: 'loading', data: null, error: null });
-
+    toast.loading('Enhancing text...', { id: 'enhance' });
     try {
       const res = await api.post('/ai/enhance-text', { text: plain, selection });
       setEnhancementState({ status: 'ready', data: res.data, error: null });
-      showToast('Text enhancement ready! Click "Apply" to use it.', 'info');
+      toast.success('Enhancement ready!', { id: 'enhance' });
     } catch (err) {
       handleApiError(err, setEnhancementState, 'Enhancement failed');
+      toast.error('Enhancement failed', { id: 'enhance' });
     }
-  }, [editor, showToast, handleApiError]);
+  }, [editor, handleApiError]);
 
   const generateSummary = useCallback(async () => {
     if (!editor) return;
     const plain = editor.getText();
-    
     if (!plain.trim()) {
-      setSummaryState({ status: 'empty', data: null, error: null });
-      showToast('Please write some content to summarize.', 'info');
+      toast('Please write some content first', { icon: 'ℹ️' });
       return;
     }
-
     setSummaryState({ status: 'loading', data: null, error: null });
-
+    toast.loading('Generating summary...', { id: 'summary' });
     try {
       const res = await api.post('/ai/summarize', { text: plain });
       setSummaryState({ status: 'ready', data: res.data, error: null });
-      showToast('Summary generated successfully!', 'info');
+      toast.success('Summary generated!', { id: 'summary' });
     } catch (err) {
-      handleApiError(err, setSummaryState, 'Summary generation failed');
+      handleApiError(err, setSummaryState, 'Summary failed');
+      toast.error('Summary failed', { id: 'summary' });
     }
-  }, [editor, showToast, handleApiError]);
+  }, [editor, handleApiError]);
 
   const getSuggestions = useCallback(async () => {
     if (!editor) return;
     const plain = editor.getText();
-    
     if (!plain.trim()) {
-      setSuggestionsState({ status: 'empty', data: null, error: null });
-      showToast('Please write some content to get suggestions.', 'info');
+      toast('Please write some content first', { icon: 'ℹ️' });
       return;
     }
-
     setSuggestionsState({ status: 'loading', data: null, error: null });
-
+    toast.loading('Getting suggestions...', { id: 'suggestions' });
     try {
       const res = await api.post('/ai/get-suggestions', { text: plain });
       setSuggestionsState({ status: 'ready', data: res.data, error: null });
-      showToast(`Generated ${res.data.ideas?.length || 0} writing suggestions!`, 'info');
+      toast.success(`${res.data.ideas?.length || 0} suggestions ready!`, { id: 'suggestions' });
     } catch (err) {
       handleApiError(err, setSuggestionsState, 'Suggestions failed');
+      toast.error('Suggestions failed', { id: 'suggestions' });
     }
-  }, [editor, showToast, handleApiError]);
+  }, [editor, handleApiError]);
 
   const getCompletion = useCallback(async () => {
     if (!editor) return;
     const plain = editor.getText();
-    
     if (!plain.trim()) {
-      setCompletionState({ status: 'empty', data: null, error: null });
-      showToast('Start typing to get auto-completion suggestions.', 'info');
+      toast('Start typing to get completions', { icon: 'ℹ️' });
       return;
     }
-
     setCompletionState({ status: 'loading', data: null, error: null });
-
+    toast.loading('Generating completion...', { id: 'complete' });
     try {
       const cursor = editor.state?.selection?.from ?? plain.length;
-      console.log('[Auto-complete] Requesting with cursor:', cursor, 'text length:', plain.length);
-      
       const res = await api.post('/ai/auto-complete', { text: plain, cursor });
-      console.log('[Auto-complete] Response:', res.data);
-      
       setCompletionState({ status: 'ready', data: res.data, error: null });
-      
-      if (res.data.completion) {
-        showToast('Completion ready! Click "Insert" to add it.', 'info');
-      }
+      if (res.data.completion) toast.success('Completion ready!', { id: 'complete' });
     } catch (err) {
       handleApiError(err, setCompletionState, 'Completion failed');
+      toast.error('Completion failed', { id: 'complete' });
     }
-  }, [editor, showToast, handleApiError]);
+  }, [editor, handleApiError]);
 
+  // Apply functions
   const applyEnhancedText = useCallback((text) => {
     if (!editor || !text) return;
     const { from, to } = editor.state.selection;
     const chain = editor.chain().focus();
-    
-    if (from !== to) {
-      chain.deleteSelection();
-    }
-    
+    if (from !== to) chain.deleteSelection();
     chain.insertContent(text).run();
-    showToast('Enhancement applied successfully!', 'info');
-    
-    // Clear the enhancement state after applying
+    toast.success('Enhancement applied!');
     setEnhancementState({ status: 'idle', data: null, error: null });
-  }, [editor, showToast]);
+  }, [editor]);
 
-  // Add this new function after the applyEnhancedText function
-const applyGrammarFixes = useCallback(() => {
-  if (!editor || !grammarState.data?.correctedText) return;
-  
-  // Replace entire document content with corrected text
-  applyingRemoteRef.current = true;
-  editor.chain().focus().clearContent().insertContent(grammarState.data.correctedText).run();
-  applyingRemoteRef.current = false;
-  
-  showToast('Grammar fixes applied successfully!', 'info');
-  
-  // Clear grammar state after applying
-  setGrammarState({ status: 'idle', data: null, error: null });
-}, [editor, grammarState.data, showToast]);
+  const applyGrammarFix = useCallback((correction, index) => {
+    if (!editor || !correction) return;
+    // Apply single correction - find and replace
+    const content = editor.getHTML();
+    if (correction.original && correction.corrected) {
+      const newContent = content.replace(correction.original, correction.corrected);
+      applyingRemoteRef.current = true;
+      editor.commands.setContent(newContent);
+      applyingRemoteRef.current = false;
+    }
+    // Remove that correction from grammarState so panel updates immediately
+    if (grammarState.data?.corrections) {
+      const newCorrections = grammarState.data.corrections.filter((_, i) => i !== index);
+      // Update correctedText if available: regenerate by applying remaining corrections naive approach
+      const newData = { ...grammarState.data, corrections: newCorrections };
+      // If no corrections left, clear state
+      if (newCorrections.length === 0) {
+        setGrammarState({ status: 'idle', data: null, error: null });
+      } else {
+        setGrammarState({ status: 'ready', data: newData, error: null });
+      }
+    } else {
+      setGrammarState({ status: 'idle', data: null, error: null });
+    }
+    toast.success('Fix applied!');
+  }, [editor, grammarState.data]);
 
-// Then pass it to the AIWritingAssistant component
+  const applyAllGrammarFixes = useCallback(() => {
+    if (!editor || !grammarState.data?.correctedText) return;
+    applyingRemoteRef.current = true;
+    editor.chain().focus().clearContent().insertContent(grammarState.data.correctedText).run();
+    applyingRemoteRef.current = false;
+    toast.success('All fixes applied!');
+    setGrammarState({ status: 'idle', data: null, error: null });
+  }, [editor, grammarState.data]);
 
   const insertCompletion = useCallback((text) => {
     if (!editor || !text) return;
     editor.chain().focus().insertContent(text).run();
-    showToast('Completion inserted!', 'info');
-    
-    // Clear the completion state after inserting
+    toast.success('Completion inserted!');
     setCompletionState({ status: 'idle', data: null, error: null });
-  }, [editor, showToast]);
+  }, [editor]);
 
+  const declineCompletion = useCallback(() => {
+    setCompletionState({ status: 'idle', data: null, error: null });
+    toast('Completion dismissed', { icon: 'ℹ️' });
+  }, []);
+
+  const declineEnhancement = useCallback(() => {
+    setEnhancementState({ status: 'idle', data: null, error: null });
+    toast('Enhancement dismissed', { icon: 'ℹ️' });
+  }, []);
+
+  const declineSummary = useCallback(() => {
+    setSummaryState({ status: 'idle', data: null, error: null });
+    toast('Summary dismissed', { icon: 'ℹ️' });
+  }, []);
+
+  const copySummary = useCallback(() => {
+    if (summaryState.data?.summary) {
+      navigator.clipboard.writeText(summaryState.data.summary);
+      toast.success('Summary copied!');
+    }
+  }, [summaryState.data]);
+
+  const insertSummary = useCallback(() => {
+    if (!editor || !summaryState.data?.summary) return;
+    editor.chain().focus().insertContent(`\n\n---\n**Summary:**\n${summaryState.data.summary}\n---\n`).run();
+    toast.success('Summary inserted!');
+    setSummaryState({ status: 'idle', data: null, error: null });
+  }, [editor, summaryState.data]);
+
+  // Suggestions accept/decline handlers
+  const applySuggestion = useCallback((idea, index) => {
+    if (!editor || !idea) return;
+    // Default action: insert suggestion detail at cursor
+    editor.chain().focus().insertContent(idea.detail).run();
+    // remove suggestion from state list
+    if (suggestionsState.data?.ideas) {
+      const newIdeas = suggestionsState.data.ideas.filter((_, i) => i !== index);
+      if (newIdeas.length === 0) {
+        setSuggestionsState({ status: 'idle', data: null, error: null });
+      } else {
+        setSuggestionsState({ status: 'ready', data: { ...suggestionsState.data, ideas: newIdeas }, error: null });
+      }
+    }
+    toast.success('Suggestion applied!');
+  }, [editor, suggestionsState.data]);
+
+  const dismissSuggestion = useCallback((index) => {
+    if (!suggestionsState.data?.ideas) return;
+    const newIdeas = suggestionsState.data.ideas.filter((_, i) => i !== index);
+    if (newIdeas.length === 0) {
+      setSuggestionsState({ status: 'idle', data: null, error: null });
+    } else {
+      setSuggestionsState({ status: 'ready', data: { ...suggestionsState.data, ideas: newIdeas }, error: null });
+    }
+    toast('Suggestion dismissed', { icon: 'ℹ️' });
+  }, [suggestionsState.data]);
+
+  // Dismiss grammar correction (called when user declines a single correction)
+  const dismissGrammarCorrection = useCallback((index) => {
+    if (!grammarState.data?.corrections) return;
+    const newCorrections = grammarState.data.corrections.filter((_, i) => i !== index);
+    if (newCorrections.length === 0) {
+      setGrammarState({ status: 'idle', data: null, error: null });
+    } else {
+      setGrammarState({ status: 'ready', data: { ...grammarState.data, corrections: newCorrections }, error: null });
+    }
+    toast('Correction dismissed', { icon: 'ℹ️' });
+  }, [grammarState.data]);
+
+  // Load document
   useEffect(() => {
     let cancelled = false;
     async function loadDoc() {
@@ -249,186 +316,271 @@ const applyGrammarFixes = useCallback(() => {
       try {
         const token = getToken();
         if (token) setAuthToken(token);
-
         const res = await api.get(`/documents/${documentId}`);
         if (cancelled) return;
         const serverData = res.data?.data;
-
-        if (!editor) {
-          setStatus('ready');
-          return;
-        }
-
+        if (res.data?.title) setDocTitle(res.data.title);
+        if (!editor) { setStatus('ready'); return; }
         applyingRemoteRef.current = true;
         if (!serverData) {
           editor.commands.setContent({ type: 'doc', content: [{ type: 'paragraph' }] });
-        } else if (typeof serverData === 'string') {
-          editor.commands.setContent(serverData);
         } else {
           editor.commands.setContent(serverData);
         }
         applyingRemoteRef.current = false;
+        setWordCount(editor.getText().trim().split(/\s+/).filter(Boolean).length);
         setStatus('ready');
       } catch (err) {
-        console.error('Load document failed', err);
-        if (!cancelled) {
-          setStatus('error');
-          showToast('Failed to load document', 'error');
-        }
+        if (!cancelled) { setStatus('error'); toast.error('Failed to load document'); }
       }
     }
     loadDoc();
     return () => { cancelled = true; };
-  }, [documentId, editor, showToast]);
+  }, [documentId, editor]);
 
+  // Socket setup
   useEffect(() => {
     const token = getToken();
     const socket = createSocket(token);
     socketRef.current = socket;
-
     socket.connect();
-
-    socket.on('connect', () => {
-      socket.emit('join-document', { documentId });
-    });
-
+    socket.on('connect', () => socket.emit('join-document', { documentId }));
     socket.on('document-data', (payload) => {
       if (!editor) return;
+      applyingRemoteRef.current = true;
       try {
-        applyingRemoteRef.current = true;
-        if (!payload) {
-          editor.commands.setContent({ type: 'doc', content: [{ type: 'paragraph' }] });
-        } else if (payload.json) {
-          editor.commands.setContent(payload.json);
-        } else if (typeof payload === 'string') {
-          editor.commands.setContent(payload);
-        } else {
-          editor.commands.setContent(payload);
-        }
-      } catch (err) {
-        console.warn('apply document-data failed', err);
-      } finally {
-        applyingRemoteRef.current = false;
-        setStatus('ready');
-      }
+        if (payload?.json) editor.commands.setContent(payload.json);
+        else if (payload) editor.commands.setContent(payload);
+      } catch (e) {}
+      applyingRemoteRef.current = false;
+      setStatus('ready');
     });
-
-    socket.on('remote-editor-update', ({ json, from }) => {
-      if (!editor) return;
-      try {
-        if (!json) return;
-        applyingRemoteRef.current = true;
-        editor.commands.setContent(json);
-      } catch (err) {
-        console.warn('apply remote update failed', err);
-      } finally {
-        setTimeout(() => { applyingRemoteRef.current = false; }, 30);
-      }
+    socket.on('remote-editor-update', ({ json }) => {
+      if (!editor || !json) return;
+      applyingRemoteRef.current = true;
+      editor.commands.setContent(json);
+      setTimeout(() => { applyingRemoteRef.current = false; }, 30);
     });
-
-    socket.on('document-saved', (meta) => {
-      console.log('document-saved', meta);
-    });
-
-    socket.on('disconnect', () => {
-      console.log('socket disconnected');
-    });
-
-    return () => {
-      if (socket) socket.disconnect();
-    };
+    return () => socket?.disconnect();
   }, [documentId, editor]);
 
+  // Auto-save
   useEffect(() => {
     const iv = setInterval(async () => {
       if (!editor) return;
       try {
         const json = editor.getJSON();
         await api.put(`/documents/${documentId}`, { data: json });
+        setLastSaved(new Date());
         if (socketRef.current?.connected) {
           socketRef.current.emit('save-document', { documentId, data: json });
         }
-      } catch (err) {
-        console.warn('Autosave failed', err);
-      }
+      } catch (e) {}
     }, 30000);
     return () => clearInterval(iv);
   }, [documentId, editor]);
 
-  useEffect(() => {
-    return () => {
-      editor?.destroy();
-    };
-  }, [editor]);
-
+  // Selection tracking
   useEffect(() => {
     if (!editor) return;
     const handleSelection = () => {
       const { from, to } = editor.state.selection;
-      if (from === to) {
-        selectionRef.current = '';
-        setSelectionText('');
-        return;
-      }
-      const text = editor.state.doc.textBetween(from, to, ' ');
-      const trimmed = text.trim();
-      selectionRef.current = trimmed;
-      setSelectionText(trimmed);
+      const text = from !== to ? editor.state.doc.textBetween(from, to, ' ').trim() : '';
+      selectionRef.current = text;
+      setSelectionText(text);
     };
     editor.on('selectionUpdate', handleSelection);
-    handleSelection();
-    return () => {
-      editor.off('selectionUpdate', handleSelection);
-    };
+    return () => editor.off('selectionUpdate', handleSelection);
   }, [editor]);
 
-  return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      {toast && (
-        <Toast 
-          message={toast.message} 
-          type={toast.type} 
-          onClose={() => setToast(null)} 
-        />
-      )}
-      
-      <div className="flex flex-col gap-4 lg:flex-row">
-        <div className="flex-1 space-y-4">
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-sm text-gray-500">
-              <span className="font-semibold text-gray-900">Document:</span> {documentId}
-            </p>
-            <p className="text-sm text-gray-500">
-              <span className="font-semibold text-gray-900">Status:</span> {status}
-            </p>
-          </div>
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        saveDocument();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [saveDocument]);
 
-          <div className="border border-gray-200 rounded-2xl bg-white shadow-sm min-h-[400px] p-2">
-            {editor ? (
-              <EditorContent editor={editor} className="min-h-[360px] prose max-w-none p-4" />
-            ) : (
-              <div className="flex h-full items-center justify-center text-gray-500">Loading editor…</div>
+  const handleLogout = () => {
+    removeToken();
+    navigate('/login');
+    toast.success('Logged out');
+  };
+
+  return (
+    <div className={`min-h-screen bg-gray-50 flex flex-col ${focusMode ? 'bg-gray-900' : ''}`}>
+      <Toaster position="top-right" toastOptions={{ duration: 4000, style: { borderRadius: '8px', padding: '12px 16px' } }} />
+      
+      {/* Header */} 
+      <header className={`sticky top-0 z-40 border-b ${focusMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} shadow-sm`}>
+        <div className="flex items-center justify-between px-4 py-3">
+          {/* Left: Logo & Title */}
+          <div className="flex items-center gap-3">
+            <button onClick={() => navigate('/docs')} className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="Back to documents">
+              <FileText className={`w-5 h-5 ${focusMode ? 'text-gray-300' : 'text-blue-600'}`} />
+            </button>
+            <input
+              type="text"
+              value={docTitle}
+              onChange={(e) => setDocTitle(e.target.value)}
+              className={`font-semibold text-lg border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-2 py-1 max-w-[200px] md:max-w-[300px] ${focusMode ? 'text-white' : 'text-gray-900'}`}
+              placeholder="Document title"
+            />
+          </div>
+          
+          {/* Center: Status */}
+          <div className="hidden md:flex items-center gap-4 text-sm text-gray-500">
+            <span>{wordCount} words</span>
+            {lastSaved && (
+              <span className="flex items-center gap-1">
+                <Save className="w-3.5 h-3.5" />
+                {lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
             )}
+            {isSaving && <span className="text-blue-600 animate-pulse">Saving...</span>}
+          </div>
+          
+          {/* Right: Actions */}
+          <div className="flex items-center gap-2">
+            <button onClick={() => setFocusMode(!focusMode)} className={`p-2 rounded-lg transition-colors ${focusMode ? 'bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`} title={focusMode ? 'Exit focus mode' : 'Focus mode (Ctrl+Shift+F)'}>
+              {focusMode ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+            </button>
+            <button onClick={saveDocument} disabled={isSaving} className="hidden md:flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors text-sm font-medium" title="Save (Ctrl+S)">
+              <Save className="w-4 h-4" />
+              Save
+            </button>
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className={`p-2 rounded-lg transition-colors hidden lg:block ${focusMode ? 'bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`} title={sidebarOpen ? 'Hide AI panel' : 'Show AI panel'}>
+              {sidebarOpen ? <PanelRightClose className="w-5 h-5" /> : <PanelRight className="w-5 h-5" />}
+            </button>
+            {/* User Menu */}
+            <div className="relative">
+              <button onClick={() => setUserMenuOpen(!userMenuOpen)} className={`p-2 rounded-lg transition-colors ${focusMode ? 'bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`}>
+                <User className="w-5 h-5" />
+              </button>
+              {userMenuOpen && (
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                  <button onClick={handleLogout} className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                    <LogOut className="w-4 h-4" /> Sign out
+                  </button>
+                </div>
+              )}
+            </div>
+            {/* Mobile menu */}
+            <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 hover:bg-gray-100 rounded-lg">
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
           </div>
         </div>
+      </header>
 
-        <AIWritingAssistant
-          grammarState={grammarState}
-          enhancementState={enhancementState}
-          summaryState={summaryState}
-          completionState={completionState}
-          suggestionsState={suggestionsState}
-          onCheckGrammar={checkGrammar}
-          onEnhanceText={enhanceText}
-          onGenerateSummary={generateSummary}
-          onGetSuggestions={getSuggestions}
-          onGetCompletion={getCompletion}
-          onApplyEnhancement={applyEnhancedText}
-          onApplyGrammarFixes={applyGrammarFixes} 
-          onInsertCompletion={insertCompletion}
-          selectionText={selectionText}
-        />
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Editor Area */}
+        <main className={`flex-1 overflow-auto p-4 md:p-6 lg:p-8 transition-all ${focusMode ? 'bg-gray-900' : ''}`}>
+          <div className={`max-w-4xl mx-auto ${focusMode ? 'max-w-3xl' : ''}`}>
+            <div className={`rounded-xl shadow-sm min-h-[calc(100vh-200px)] ${focusMode ? 'bg-gray-800 border-gray-700' : 'bg-white border border-gray-200'}`}>
+              {status === 'loading' ? (
+                <div className="p-8 space-y-4 animate-pulse">
+                  <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                  <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+                  <div className="h-4 bg-gray-200 rounded w-5/6"></div>
+                  <div className="h-4 bg-gray-200 rounded w-2/3"></div>
+                </div>
+              ) : editor ? (
+                <EditorContent editor={editor} className={`prose max-w-none p-6 md:p-8 min-h-[400px] focus:outline-none ${focusMode ? 'prose-invert' : ''}`} />
+              ) : (
+                <div className="flex items-center justify-center h-64 text-gray-500">Loading editor...</div>
+              )}
+            </div>
+          </div>
+        </main>
+
+        {/* AI Sidebar - Desktop */}
+        {sidebarOpen && !focusMode && (
+          <aside className="hidden lg:block w-[400px] border-l border-gray-200 bg-white overflow-y-auto">
+            <AIWritingAssistant
+              grammarState={grammarState}
+              enhancementState={enhancementState}
+              summaryState={summaryState}
+              completionState={completionState}
+              suggestionsState={suggestionsState}
+              onCheckGrammar={checkGrammar}
+              onEnhanceText={enhanceText}
+              onGenerateSummary={generateSummary}
+              onGetSuggestions={getSuggestions}
+              onGetCompletion={getCompletion}
+              onApplyEnhancement={applyEnhancedText}
+              onApplyGrammarFix={applyGrammarFix}            // (correction, index)
+              onApplyAllGrammarFixes={applyAllGrammarFixes}
+              onInsertCompletion={insertCompletion}
+              onCopySummary={copySummary}
+              onInsertSummary={insertSummary}
+              onRegenerateSummary={generateSummary}
+              onRegenerateEnhancement={enhanceText}
+              // NEW dismissal/apply handlers
+              onDismissGrammar={dismissGrammarCorrection}
+              onDeclineEnhancement={declineEnhancement}
+              onDeclineCompletion={declineCompletion}
+              onDeclineSummary={declineSummary}
+              onDismissSuggestion={dismissSuggestion}
+              onApplySuggestion={applySuggestion}
+              selectionText={selectionText}
+            />
+          </aside>
+        )}
       </div>
+
+      {/* Mobile Bottom Sheet for AI */}
+      {mobileMenuOpen && !focusMode && (
+        <div className="lg:hidden fixed inset-0 z-50 bg-black/50" onClick={() => setMobileMenuOpen(false)}>
+          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b border-gray-100 p-4 flex justify-between items-center">
+              <h3 className="font-semibold text-gray-900">AI Assistant</h3>
+              <button onClick={() => setMobileMenuOpen(false)} className="p-2 hover:bg-gray-100 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <AIWritingAssistant
+              grammarState={grammarState}
+              enhancementState={enhancementState}
+              summaryState={summaryState}
+              completionState={completionState}
+              suggestionsState={suggestionsState}
+              onCheckGrammar={checkGrammar}
+              onEnhanceText={enhanceText}
+              onGenerateSummary={generateSummary}
+              onGetSuggestions={getSuggestions}
+              onGetCompletion={getCompletion}
+              onApplyEnhancement={applyEnhancedText}
+              onApplyGrammarFix={applyGrammarFix}
+              onApplyAllGrammarFixes={applyAllGrammarFixes}
+              onInsertCompletion={insertCompletion}
+              onCopySummary={copySummary}
+              onInsertSummary={insertSummary}
+              onRegenerateSummary={generateSummary}
+              onRegenerateEnhancement={enhanceText}
+              onDismissGrammar={dismissGrammarCorrection}
+              onDeclineEnhancement={declineEnhancement}
+              onDeclineCompletion={declineCompletion}
+              onDeclineSummary={declineSummary}
+              onDismissSuggestion={dismissSuggestion}
+              onApplySuggestion={applySuggestion}
+              selectionText={selectionText}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Floating AI Button - Mobile */}
+      {!focusMode && (
+        <button onClick={() => setMobileMenuOpen(true)} className="lg:hidden fixed bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-blue-700 transition-all hover:scale-105 z-30">
+          <Sparkles className="w-6 h-6" />
+        </button>
+      )}
     </div>
   );
 }
