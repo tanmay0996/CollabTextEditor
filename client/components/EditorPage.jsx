@@ -10,7 +10,8 @@ export default function EditorPage({ documentId, token }) {
   const socketRef = useRef(null);
 
   useEffect(() => {
-    const s = connectSocket(process.env.REACT_APP_SERVER_URL || 'http://localhost:8000');
+    const s = connectSocket(import.meta.env.VITE_REACT_APP_SERVER_URL
+      || 'http://localhost:8000');
     socketRef.current = s;
     s.auth = { token }; // optional
     s.connect();

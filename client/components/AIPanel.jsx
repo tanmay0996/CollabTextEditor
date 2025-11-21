@@ -7,7 +7,8 @@ export default function AIPanel({ token }) {
   const [resp, setResp] = useState(null);
 
   async function grammarCheck() {
-    const { data } = await axios.post(`${process.env.REACT_APP_SERVER_URL}/api/ai/grammar-check`, { text }, {
+    const { data } = await axios.post(`${import.meta.env.VITE_REACT_APP_SERVER_URL
+    }/api/ai/grammar-check`, { text }, {
       headers: { Authorization: `Bearer ${token}` }
     });
     setResp(data);
