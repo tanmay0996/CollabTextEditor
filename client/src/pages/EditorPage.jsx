@@ -479,9 +479,9 @@ export default function EditorPage() {
           
           {/* Right: Actions */}
           <div className="flex items-center gap-2">
-            <button onClick={() => setFocusMode(!focusMode)} className={`p-2 rounded-lg transition-colors ${focusMode ? 'bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`} title={focusMode ? 'Exit focus mode' : 'Focus mode (Ctrl+Shift+F)'}>
+            {/* <button onClick={() => setFocusMode(!focusMode)} className={`p-2 rounded-lg transition-colors ${focusMode ? 'bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`} title={focusMode ? 'Exit focus mode' : 'Focus mode (Ctrl+Shift+F)'}>
               {focusMode ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
+            </button> */}
             <button onClick={saveDocument} disabled={isSaving} className="hidden md:flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors text-sm font-medium" title="Save (Ctrl+S)">
               <Save className="w-4 h-4" />
               Save
