@@ -522,9 +522,9 @@ function SuggestionCard({ idea, onApply, onDismiss, onMoreInfo, expanded }) {
       <p className={`text-sm text-gray-600 leading-relaxed ${expanded ? '' : 'line-clamp-2'}`}>{idea.detail}</p>
       
       <div className="flex gap-2 mt-3">
-        <button onClick={onApply} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors" style={{ ...suggestionBtnStyle, backgroundColor: '#16A34A', color: '#fff' }}>
+        {/* <button onClick={onApply} className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 transition-colors" style={{ ...suggestionBtnStyle, backgroundColor: '#16A34A', color: '#fff' }}>
           <Check className="w-3.5 h-3.5 text-white" /> Apply
-        </button>
+        </button> */}
         <button onClick={onDismiss} className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-300 transition-colors" style={{ ...suggestionBtnStyle, backgroundColor: '#E5E7EB', color: '#374151' }}>
           <X className="w-3.5 h-3.5 text-gray-700" /> Dismiss
         </button>
