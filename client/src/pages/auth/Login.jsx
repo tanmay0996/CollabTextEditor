@@ -6,8 +6,8 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Toaster, toast } from 'react-hot-toast';
 import { Eye, EyeOff, Mail, Lock, Loader2, FileText } from 'lucide-react';
-import api, { setAuthToken } from '../services/api';
-import { saveToken } from '../utils/auth';
+import api, { setAuthToken } from '@/services/api';
+import { saveToken } from '@/utils/auth';
 
 const loginSchema = z.object({
   email: z.string().min(1, 'Email is required').email('Enter a valid email'),

@@ -1,8 +1,8 @@
 // src/pages/DocumentsList.jsx
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import api, { setAuthToken } from '../services/api';
-import { getToken } from '../utils/auth';
+import api, { setAuthToken } from '@/services/api';
+import { getToken } from '@/utils/auth';
 import {
   FileText,
   Loader2,
@@ -37,7 +37,7 @@ export default function DocumentsList() {
     }
     load();
     return () => { cancelled = true; };
-  }, []);
+  }, [nav]);
 
   async function createDoc(e) {
     e.preventDefault();

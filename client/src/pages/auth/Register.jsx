@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Toaster, toast } from 'react-hot-toast';
 import { Eye, EyeOff, Mail, Lock, User, Loader2, FileText, CheckCircle2 } from 'lucide-react';
-import api from '../services/api';
+import api from '@/services/api';
 
 const registerSchema = z.object({
   name: z.string().min(1, 'Name is required').min(2, 'Name must be at least 2 characters'),

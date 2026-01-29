@@ -69,9 +69,7 @@ export default function AIWritingAssistant({
     zIndex: 1,
   };
   const primaryBlue = '#2563EB';   // tailwind blue-600
-  const primaryBlueHover = '#1D4ED8'; // blue-700
   const green600 = '#16A34A';
-  const green700 = '#15803D';
   const gray600 = '#4B5563';
   const gray200 = '#E5E7EB';
   const blue100 = '#DBEAFE';
@@ -511,7 +509,7 @@ function GrammarCorrectionCard({ item, onAccept, onDecline, expanded, onToggleEx
   );
 }
 
-function SuggestionCard({ idea, onApply, onDismiss, onMoreInfo, expanded }) {
+function SuggestionCard({ idea, onDismiss, onMoreInfo, expanded }) {
   const suggestionBtnStyle = { minHeight: '36px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', zIndex: 1 };
   return (
     <div className="p-3 bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow">
@@ -540,13 +538,14 @@ function LoadingSkeleton({ lines = 3 }) {
   return (
     <div className="space-y-3 animate-pulse">
       {Array.from({ length: lines }).map((_, i) => (
-        <div key={i} className="h-4 bg-gray-200 rounded" style={{ width: `${70 + Math.random() * 30}%` }}></div>
+        <div key={i} className="h-4 bg-gray-200 rounded" style={{ width: `${70 + ((i * 13) % 31)}%` }}></div>
       ))}
     </div>
   );
 }
 
-function EmptyState({ icon: Icon, text }) {
+function EmptyState({ icon, text }) {
+  const Icon = icon;
   return (
     <div className="text-center py-8 px-4">
       <Icon className="w-10 h-10 text-gray-300 mx-auto mb-3" />

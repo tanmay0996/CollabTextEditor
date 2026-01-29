@@ -3,12 +3,12 @@ import React, { useEffect, useState } from 'react';
 import { Routes, Route, Link, useNavigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { FileText, Users, Sparkles, Shield, ArrowRight, Loader2, Menu, X } from 'lucide-react';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import DocumentsList from './pages/DocumentsList';
-import EditorPage from './pages/EditorPage';
-import PrivateRoute from '../components/PrivateRoute';
-import PublicRoute from '../components/PublicRoute';
+import Login from '@/pages/auth/Login';
+import Register from '@/pages/auth/Register';
+import DocumentsList from '@/pages/documents/DocumentsList';
+import EditorPage from '@/pages/documents/Editor';
+import PrivateRoute from '@/components/layout/PrivateRoute';
+import PublicRoute from '@/components/layout/PublicRoute';
 import api from './services/api';
 
 function Landing({ firstTime }) {
@@ -196,7 +196,7 @@ function MobileMenu() {
 
 export default function App() {
   const [firstTime, setFirstTime] = useState(null);
-  const nav = useNavigate();
+  useNavigate();
 
   useEffect(() => {
     let cancelled = false;
@@ -204,7 +204,7 @@ export default function App() {
       try {
         const res = await api.get('/auth/first-time');
         if (!cancelled) setFirstTime(res.data?.firstTime === true);
-      } catch (err) {
+      } catch {
         setFirstTime(false);
       }
     }

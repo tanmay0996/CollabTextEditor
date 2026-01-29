@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Quill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-import { connectSocket } from '../services/socket';
+import { createSocket } from '@/services/socket';
 import axios from 'axios';
 
 export default function EditorPage({ documentId, token }) {
@@ -10,10 +10,8 @@ export default function EditorPage({ documentId, token }) {
   const socketRef = useRef(null);
 
   useEffect(() => {
-    const s = connectSocket(import.meta.env.VITE_REACT_APP_SERVER_URL
-      || 'http://localhost:8000');
+    const s = createSocket(token);
     socketRef.current = s;
-    s.auth = { token }; // optional
     s.connect();
 
     s.on('connect', () => console.log('socket connected in client', s.id));
@@ -46,7 +44,8 @@ export default function EditorPage({ documentId, token }) {
       const data = quill.getContents();
       socketRef.current.emit('save-document', { documentId, data });
       // also persist via HTTP for reliability
-      axios.put(`${process.env.REACT_APP_SERVER_URL}/api/documents/${documentId}`, { data }, {
+      const base = import.meta.env.VITE_REACT_APP_SERVER_URL || 'http://localhost:8000';
+      axios.put(`${base}/api/documents/${documentId}`, { data }, {
         headers: { Authorization: `Bearer ${token}` }
       }).catch(()=>{/* ignore */});
     }, 30000);

@@ -7,10 +7,10 @@ import {
   Menu, X, Save, Eye, EyeOff, ChevronDown, User, LogOut, 
   FileText, Sparkles, PanelRightClose, PanelRight
 } from 'lucide-react';
-import api, { setAuthToken } from '../services/api';
-import { getToken, clearToken } from '../utils/auth';
-import { createSocket } from '../services/socket';
-import AIWritingAssistant from '../../components/AIWritingAssistant';
+import api, { setAuthToken } from '@/services/api';
+import { getToken, clearToken } from '@/utils/auth';
+import { createSocket } from '@/services/socket';
+import AIWritingAssistant from '@/components/editor/AIWritingAssistant';
 
 export default function EditorPage() {
   const { id: documentId } = useParams();
@@ -20,7 +20,7 @@ export default function EditorPage() {
   const [wordCount, setWordCount] = useState(0);
   const [lastSaved, setLastSaved] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [focusMode, setFocusMode] = useState(false);
+  const [focusMode, _setFocusMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -80,7 +80,7 @@ export default function EditorPage() {
       await api.put(`/documents/${documentId}`, { data: json, title: docTitle });
       setLastSaved(new Date());
       toast.success('Document saved');
-    } catch (err) {
+    } catch {
       toast.error('Failed to save document');
     } finally {
       setIsSaving(false);
@@ -330,7 +330,7 @@ export default function EditorPage() {
         applyingRemoteRef.current = false;
         setWordCount(editor.getText().trim().split(/\s+/).filter(Boolean).length);
         setStatus('ready');
-      } catch (err) {
+      } catch {
         if (!cancelled) { setStatus('error'); toast.error('Failed to load document'); }
       }
     }
@@ -351,7 +351,9 @@ export default function EditorPage() {
       try {
         if (payload?.json) editor.commands.setContent(payload.json);
         else if (payload) editor.commands.setContent(payload);
-      } catch (e) {}
+      } catch {
+        void 0;
+      }
       applyingRemoteRef.current = false;
       setStatus('ready');
     });
@@ -375,7 +377,9 @@ export default function EditorPage() {
         if (socketRef.current?.connected) {
           socketRef.current.emit('save-document', { documentId, data: json });
         }
-      } catch (e) {}
+      } catch {
+        void 0;
+      }
     }, 30000);
     return () => clearInterval(iv);
   }, [documentId, editor]);
@@ -424,7 +428,7 @@ export default function EditorPage() {
       if (typeof setAuthToken === 'function') {
         try {
           setAuthToken(null); // if your helper supports null to remove header
-        } catch (e) {
+        } catch {
           if (api?.defaults?.headers?.common) delete api.defaults.headers.common['Authorization'];
         }
       } else {
@@ -437,8 +441,8 @@ export default function EditorPage() {
     } catch (err) {
       console.error('Logout error', err);
       // fallback: try to at least clear local token and navigate
-      try { clearToken(); } catch (e) {}
-      try { navigate('/login'); } catch (e) {}
+      try { clearToken(); } catch { void 0; }
+      try { navigate('/login'); } catch { void 0; }
       toast.success('Logged out');
     }
   };
