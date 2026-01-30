@@ -4,6 +4,12 @@ const router = express.Router();
 const Document = require('../models/Document');
 const auth = require('../middleware/auth'); // simple JWT middleware
 
+ function hasDocAccess(doc, userId) {
+   if (!doc || !userId) return false;
+   if (String(doc.owner) === String(userId)) return true;
+   return Array.isArray(doc.collaborators) && doc.collaborators.some((c) => String(c) === String(userId));
+ }
+
 // create document
 router.post('/', auth, async (req, res) => {
   const { title } = req.body;
@@ -22,7 +28,14 @@ router.get('/', auth, async (req, res) => {
 router.get('/:id', auth, async (req, res) => {
   const doc = await Document.findById(req.params.id);
   if(!doc) return res.status(404).json({ error: 'Not found' });
-  // permission check omitted for brevity — add owner/collab check
+
+  if (!hasDocAccess(doc, req.user.id)) {
+    await Document.updateOne(
+      { _id: doc._id },
+      { $addToSet: { collaborators: req.user.id } }
+    );
+  }
+
   res.json(doc);
 });
 
@@ -31,7 +44,14 @@ router.put('/:id', auth, async (req, res) => {
   const { data, title } = req.body;
   const doc = await Document.findById(req.params.id);
   if(!doc) return res.status(404).json({ error: 'Not found' });
-  // permission check omitted
+
+  if (!hasDocAccess(doc, req.user.id)) {
+    await Document.updateOne(
+      { _id: doc._id },
+      { $addToSet: { collaborators: req.user.id } }
+    );
+  }
+
   if (data) doc.data = data;
   if (title) doc.title = title;
   await doc.save();

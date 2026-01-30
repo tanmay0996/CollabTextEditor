@@ -80,8 +80,10 @@ export default function EditorPage() {
       await api.put(`/documents/${documentId}`, { data: json, title: docTitle });
       setLastSaved(new Date());
       toast.success('Document saved');
-    } catch {
-      toast.error('Failed to save document');
+    } catch (err) {
+      console.warn('Failed to save document', err);
+      const msg = err?.response?.data?.error || err?.message || 'Failed to save document';
+      toast.error(msg);
     } finally {
       setIsSaving(false);
     }
@@ -330,8 +332,10 @@ export default function EditorPage() {
         applyingRemoteRef.current = false;
         setWordCount(editor.getText().trim().split(/\s+/).filter(Boolean).length);
         setStatus('ready');
-      } catch {
-        if (!cancelled) { setStatus('error'); toast.error('Failed to load document'); }
+      } catch (err) {
+        console.warn('Failed to load document', err);
+        const msg = err?.response?.data?.error || err?.message || 'Failed to load document';
+        if (!cancelled) { setStatus('error'); toast.error(msg); }
       }
     }
     loadDoc();
@@ -345,6 +349,9 @@ export default function EditorPage() {
     socketRef.current = socket;
     socket.connect();
     socket.on('connect', () => socket.emit('join-document', { documentId }));
+    socket.on('document-title', (title) => {
+      if (typeof title === 'string' && title.trim()) setDocTitle(title);
+    });
     socket.on('document-data', (payload) => {
       if (!editor) return;
       applyingRemoteRef.current = true;
@@ -372,17 +379,17 @@ export default function EditorPage() {
       if (!editor) return;
       try {
         const json = editor.getJSON();
-        await api.put(`/documents/${documentId}`, { data: json });
+        await api.put(`/documents/${documentId}`, { data: json, title: docTitle });
         setLastSaved(new Date());
         if (socketRef.current?.connected) {
           socketRef.current.emit('save-document', { documentId, data: json });
         }
-      } catch {
-        void 0;
+      } catch (err) {
+        console.warn('Auto-save failed', err);
       }
     }, 30000);
     return () => clearInterval(iv);
-  }, [documentId, editor]);
+  }, [documentId, editor, docTitle]);
 
   // Selection tracking
   useEffect(() => {

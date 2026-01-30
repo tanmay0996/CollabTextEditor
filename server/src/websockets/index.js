@@ -8,6 +8,7 @@ function socketHandler(io) {
       const doc = await Document.findById(documentId);
       if (doc) {
         socket.emit('document-data', doc.data);
+        socket.emit('document-title', doc.title);
       } else {
         socket.emit('document-data', null);
       }
@@ -19,7 +20,11 @@ function socketHandler(io) {
     });
 
     socket.on('save-document', async ({ documentId, data }) => {
-      await Document.findByIdAndUpdate(documentId, { data }, { new: true, upsert: true });
+      const doc = await Document.findById(documentId);
+      if (!doc) return;
+      doc.data = data;
+      doc.updatedAt = Date.now();
+      await doc.save();
       io.to(documentId).emit('document-saved', { by: socket.id, time: Date.now() });
     });
   });
