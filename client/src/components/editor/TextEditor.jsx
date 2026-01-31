@@ -8,6 +8,7 @@ import api from '@/services/api';
 export default function EditorPage({ documentId }) {
   const [quill, setQuill] = useState(null);
   const socketRef = useRef(null);
+  const versionRef = useRef(0);
 
   useEffect(() => {
     let mounted = true;
@@ -20,11 +21,26 @@ export default function EditorPage({ documentId }) {
         socketRef.current = s;
         s.on('connect', () => console.log('socket connected in client', s.id));
         s.on('document-data', (data) => {
-          if (quill) quill.setContents(data);
+          const json = data?.json || data;
+          if (typeof data?.version === 'number') versionRef.current = data.version;
+          if (quill) quill.setContents(json);
         });
 
         s.on('remote-text-change', (delta) => {
           if (quill) quill.updateContents(delta);
+        });
+
+        s.on('doc:update', (payload) => {
+          if (!payload) return;
+          const incomingVersion = typeof payload.version === 'number' ? payload.version : 0;
+          if (incomingVersion && incomingVersion <= versionRef.current) return;
+          if (incomingVersion) versionRef.current = incomingVersion;
+          if (quill && payload.data) quill.setContents(payload.data);
+        });
+
+        s.on('doc:ack', (payload) => {
+          const incomingVersion = typeof payload?.version === 'number' ? payload.version : 0;
+          if (incomingVersion) versionRef.current = incomingVersion;
         });
       } catch (err) {
         console.warn('socket connect failed', err);
@@ -50,9 +66,9 @@ export default function EditorPage({ documentId }) {
     // autosave local -> send save event every 30s
     const interval = setInterval(() => {
       const data = quill.getContents();
-      socketRef.current.emit('save-document', { documentId, data });
+      socketRef.current.emit('save-document', { documentId, data, baseVersion: versionRef.current });
       // also persist via HTTP for reliability
-      api.put(`/documents/${documentId}`, { data }).catch(() => { /* ignore */ });
+      api.put(`/documents/${documentId}`, { data, baseVersion: versionRef.current }).catch(() => { /* ignore */ });
     }, 30000);
 
     return () => { quill.off('text-change', handler); clearInterval(interval); };

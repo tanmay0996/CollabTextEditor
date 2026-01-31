@@ -8,7 +8,7 @@ export default function PrivateRoute({ children }) {
   const { status } = useAuth();
 
   if (status === 'unknown') {
-    return null;
+    return <div className="min-h-screen flex items-center justify-center text-gray-500">Loading...</div>;
   }
 
   if (status !== 'authenticated') {

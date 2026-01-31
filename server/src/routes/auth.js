@@ -6,9 +6,56 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 
 const User = require('../models/User');
-const authMiddleware = require('../middleware/auth'); // expects req.header('Authorization') -> "Bearer <token>"
+const authMiddleware = require('../middleware/auth');
+
+function setSessionCookie(res, token) {
+  const isProd = process.env.NODE_ENV === 'production';
+  res.cookie('sid', token, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? 'strict' : 'lax',
+    path: '/',
+  });
+}
+
+function clearSessionCookie(res) {
+  const isProd = process.env.NODE_ENV === 'production';
+  res.cookie('sid', '', {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? 'strict' : 'lax',
+    path: '/',
+    maxAge: 0,
+  });
+}
 
 // POST /api/auth/register
+async function registerHandler(req, res) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  const { name, email, password } = req.body;
+  try {
+    let user = await User.findOne({ email });
+    if (user) return res.status(400).json({ error: 'User already exists' });
+
+    const salt = await bcrypt.genSalt(10);
+    const hashed = await bcrypt.hash(password, salt);
+
+    user = new User({ name: name.trim(), email: email.toLowerCase().trim(), password: hashed });
+    await user.save();
+
+    const payload = { id: user._id, name: user.name, email: user.email };
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15m' });
+    setSessionCookie(res, token);
+
+    return res.status(201).json({ user: payload });
+  } catch (err) {
+    console.error('Register error', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+}
+
 router.post(
   '/register',
   [
@@ -16,28 +63,17 @@ router.post(
     body('email').isEmail().withMessage('Valid email required'),
     body('password').isLength({ min: 6 }).withMessage('Password min 6 chars'),
   ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  registerHandler
+);
 
-    const { name, email, password } = req.body;
-    try {
-      let user = await User.findOne({ email });
-      if (user) return res.status(400).json({ error: 'User already exists' });
-
-      const salt = await bcrypt.genSalt(10);
-      const hashed = await bcrypt.hash(password, salt);
-
-      user = new User({ name: name.trim(), email: email.toLowerCase().trim(), password: hashed });
-      await user.save();
-
-      // Do NOT issue token on register per your flow. Redirect user to login on client.
-      return res.status(201).json({ ok: true, msg: 'Registration successful. Please login.' });
-    } catch (err) {
-      console.error('Register error', err);
-      return res.status(500).json({ error: 'Server error' });
-    }
-  }
+router.post(
+  '/signup',
+  [
+    body('name').isLength({ min: 2 }).withMessage('Name required'),
+    body('email').isEmail().withMessage('Valid email required'),
+    body('password').isLength({ min: 6 }).withMessage('Password min 6 chars'),
+  ],
+  registerHandler
 );
 
 // POST /api/auth/login
@@ -60,9 +96,10 @@ router.post(
       if (!isMatch) return res.status(400).json({ error: 'Invalid credentials' });
 
       const payload = { id: user._id, name: user.name, email: user.email };
-      const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
+      const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15m' });
+      setSessionCookie(res, token);
 
-      return res.json({ token, user: payload });
+      return res.json({ user: payload });
     } catch (err) {
       console.error('Login error', err);
       return res.status(500).json({ error: 'Server error' });
@@ -76,7 +113,7 @@ router.get('/me', authMiddleware, async (req, res) => {
     // auth middleware sets req.user = decoded token payload { id, name, email }
     const user = await User.findById(req.user.id).select('-password');
     if (!user) return res.status(404).json({ error: 'User not found' });
-    return res.json(user);
+    return res.json({ user: { id: user._id, name: user.name, email: user.email } });
   } catch (err) {
     console.error('Me error', err);
     return res.status(500).json({ error: 'Server error' });
@@ -84,9 +121,9 @@ router.get('/me', authMiddleware, async (req, res) => {
 });
 
 // POST /api/auth/logout  (stateless - client should drop token)
-router.post('/logout', authMiddleware, async (req, res) => {
-  // No server-side blacklist — logout is handled on the client by removing the token.
-  return res.json({ ok: true, msg: 'Logout success (client should delete token)' });
+router.post('/logout', async (req, res) => {
+  clearSessionCookie(res);
+  return res.json({ ok: true });
 });
 
 // GET /api/auth/first-time  -> returns whether there are zero users (first-time setup)

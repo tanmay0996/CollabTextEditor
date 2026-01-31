@@ -8,7 +8,6 @@ import {
   FileText, Sparkles, PanelRightClose, PanelRight
 } from 'lucide-react';
 import api from '@/services/api';
-import { clearToken } from '@/utils/auth';
 import { connectSocket } from '@/services/socket';
 import AIWritingAssistant from '@/components/editor/AIWritingAssistant';
 import { useAuth } from '@/auth/AuthProvider';
@@ -39,6 +38,23 @@ export default function EditorPage() {
   const socketRef = useRef(null);
   const applyingRemoteRef = useRef(false);
   const selectionRef = useRef('');
+  const versionRef = useRef(0);
+  const inFlightRef = useRef(false);
+  const queuedJsonRef = useRef(null);
+  const pendingRemoteRef = useRef(null);
+
+  const emitDocEdit = useCallback((json) => {
+    const socket = socketRef.current;
+    if (!socket?.connected) return;
+
+    if (inFlightRef.current) {
+      queuedJsonRef.current = json;
+      return;
+    }
+
+    inFlightRef.current = true;
+    socket.emit('doc:edit', { documentId, json, baseVersion: versionRef.current });
+  }, [documentId]);
 
   const editor = useEditor({
     extensions: [StarterKit],
@@ -57,9 +73,7 @@ export default function EditorPage() {
       editorRef.current.lastSent = now;
       try {
         const json = editor.getJSON();
-        if (socketRef.current?.connected) {
-          socketRef.current.emit('editor-update', { documentId, json });
-        }
+        emitDocEdit(json);
       } catch (err) {
         console.warn('emit editor-update failed', err);
       }
@@ -79,13 +93,26 @@ export default function EditorPage() {
     setIsSaving(true);
     try {
       const json = editor.getJSON();
-      await api.put(`/documents/${documentId}`, { data: json, title: docTitle });
+      const res = await api.put(`/documents/${documentId}`, { data: json, title: docTitle, baseVersion: versionRef.current });
+      versionRef.current = typeof res.data?.version === 'number' ? res.data.version : versionRef.current;
       setLastSaved(new Date());
       toast.success('Document saved');
     } catch (err) {
       console.warn('Failed to save document', err);
-      const msg = err?.response?.data?.error || err?.message || 'Failed to save document';
-      toast.error(msg);
+      if (err?.response?.status === 409 && err?.response?.data?.doc) {
+        const serverDoc = err.response.data.doc;
+        versionRef.current = typeof serverDoc?.version === 'number' ? serverDoc.version : versionRef.current;
+        if (serverDoc?.title) setDocTitle(serverDoc.title);
+        if (serverDoc?.data) {
+          applyingRemoteRef.current = true;
+          try { editor.commands.setContent(serverDoc.data); } catch { void 0; }
+          applyingRemoteRef.current = false;
+        }
+        toast.error('Your save was stale. Synced to latest.');
+      } else {
+        const msg = err?.response?.data?.error || err?.message || 'Failed to save document';
+        toast.error(msg);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -209,6 +236,12 @@ export default function EditorPage() {
       applyingRemoteRef.current = true;
       editor.commands.setContent(newContent);
       applyingRemoteRef.current = false;
+
+      try {
+        emitDocEdit(editor.getJSON());
+      } catch {
+        void 0;
+      }
     }
     // Remove that correction from grammarState so panel updates immediately
     if (grammarState.data?.corrections) {
@@ -225,16 +258,22 @@ export default function EditorPage() {
       setGrammarState({ status: 'idle', data: null, error: null });
     }
     toast.success('Fix applied!');
-  }, [editor, grammarState.data]);
+  }, [editor, grammarState.data, emitDocEdit]);
 
   const applyAllGrammarFixes = useCallback(() => {
     if (!editor || !grammarState.data?.correctedText) return;
     applyingRemoteRef.current = true;
     editor.chain().focus().clearContent().insertContent(grammarState.data.correctedText).run();
     applyingRemoteRef.current = false;
+
+    try {
+      emitDocEdit(editor.getJSON());
+    } catch {
+      void 0;
+    }
     toast.success('All fixes applied!');
     setGrammarState({ status: 'idle', data: null, error: null });
-  }, [editor, grammarState.data]);
+  }, [editor, grammarState.data, emitDocEdit]);
 
   const insertCompletion = useCallback((text) => {
     if (!editor || !text) return;
@@ -321,6 +360,7 @@ export default function EditorPage() {
         const res = await api.get(`/documents/${documentId}`);
         if (cancelled) return;
         const serverData = res.data?.data;
+        versionRef.current = typeof res.data?.version === 'number' ? res.data.version : 0;
         if (res.data?.title) setDocTitle(res.data.title);
         if (!editor) { setStatus('ready'); return; }
         applyingRemoteRef.current = true;
@@ -352,12 +392,121 @@ export default function EditorPage() {
         socket = await connectSocket();
         if (!mounted) return;
         socketRef.current = socket;
-        socket.on('connect', () => socket.emit('join-document', { documentId }));
+        socket.on('connect', async () => {
+          socket.emit('join-document', { documentId });
+          try {
+            const res = await api.get(`/documents/${documentId}`);
+            const incomingVersion = typeof res.data?.version === 'number' ? res.data.version : 0;
+            if (incomingVersion > versionRef.current && editor) {
+              versionRef.current = incomingVersion;
+              applyingRemoteRef.current = true;
+              editor.commands.setContent(res.data?.data || { type: 'doc', content: [{ type: 'paragraph' }] });
+              applyingRemoteRef.current = false;
+            }
+          } catch {
+            void 0;
+          }
+        });
+
+        socket.on('connect_error', (e) => {
+          console.warn('socket connect_error', e?.message || e);
+        });
+
         socket.on('document-title', (title) => {
           if (typeof title === 'string' && title.trim()) setDocTitle(title);
         });
+
+        socket.on('doc:init', (payload) => {
+          if (!editor || !payload) return;
+          const incomingVersion = typeof payload.version === 'number' ? payload.version : 0;
+          versionRef.current = incomingVersion;
+          if (typeof payload.title === 'string' && payload.title.trim()) setDocTitle(payload.title);
+          applyingRemoteRef.current = true;
+          try {
+            editor.commands.setContent(payload.data || { type: 'doc', content: [{ type: 'paragraph' }] });
+          } catch {
+            void 0;
+          }
+          applyingRemoteRef.current = false;
+          setStatus('ready');
+        });
+
+        socket.on('doc:update', (payload) => {
+          if (!editor || !payload) return;
+          const incomingVersion = typeof payload.version === 'number' ? payload.version : 0;
+          if (incomingVersion <= versionRef.current) return;
+
+          if (inFlightRef.current) {
+            const pendingVersion = typeof pendingRemoteRef.current?.version === 'number' ? pendingRemoteRef.current.version : 0;
+            if (!pendingVersion || incomingVersion > pendingVersion) {
+              pendingRemoteRef.current = payload;
+            }
+            return;
+          }
+
+          versionRef.current = incomingVersion;
+          inFlightRef.current = false;
+          queuedJsonRef.current = null;
+          if (typeof payload.title === 'string' && payload.title.trim()) setDocTitle(payload.title);
+
+          applyingRemoteRef.current = true;
+          try {
+            editor.commands.setContent(payload.data);
+          } catch {
+            void 0;
+          }
+          applyingRemoteRef.current = false;
+        });
+
+        socket.on('doc:ack', (payload) => {
+          const newVersion = typeof payload?.version === 'number' ? payload.version : null;
+          if (typeof newVersion === 'number') versionRef.current = newVersion;
+          inFlightRef.current = false;
+          setLastSaved(new Date());
+
+          const pending = pendingRemoteRef.current;
+          pendingRemoteRef.current = null;
+          if (pending) {
+            const pendingVersion = typeof pending.version === 'number' ? pending.version : 0;
+            if (pendingVersion > versionRef.current && editor) {
+              versionRef.current = pendingVersion;
+              if (typeof pending.title === 'string' && pending.title.trim()) setDocTitle(pending.title);
+              applyingRemoteRef.current = true;
+              try { editor.commands.setContent(pending.data); } catch { void 0; }
+              applyingRemoteRef.current = false;
+            }
+          }
+
+          const queued = queuedJsonRef.current;
+          queuedJsonRef.current = null;
+          if (queued && socketRef.current?.connected) {
+            inFlightRef.current = true;
+            socketRef.current.emit('doc:edit', { documentId, json: queued, baseVersion: versionRef.current });
+          }
+        });
+
+        socket.on('doc:reject', ({ reason, current }) => {
+          console.warn('doc:reject', reason);
+          inFlightRef.current = false;
+          queuedJsonRef.current = null;
+          pendingRemoteRef.current = null;
+          const incomingVersion = typeof current?.version === 'number' ? current.version : 0;
+          versionRef.current = incomingVersion;
+          if (current?.title) setDocTitle(current.title);
+          if (editor && current?.data) {
+            applyingRemoteRef.current = true;
+            try { editor.commands.setContent(current.data); } catch { void 0; }
+            applyingRemoteRef.current = false;
+          }
+          toast.error('Document was updated elsewhere. Synced to latest.');
+        });
+
         socket.on('document-data', (payload) => {
           if (!editor) return;
+          const incomingVersion = typeof payload?.version === 'number' ? payload.version : 0;
+          if (incomingVersion && incomingVersion <= versionRef.current) return;
+          if (incomingVersion) versionRef.current = incomingVersion;
+
           applyingRemoteRef.current = true;
           try {
             if (payload?.json) editor.commands.setContent(payload.json);
@@ -368,8 +517,13 @@ export default function EditorPage() {
           applyingRemoteRef.current = false;
           setStatus('ready');
         });
-        socket.on('remote-editor-update', ({ json }) => {
+
+        socket.on('remote-editor-update', ({ json, version }) => {
           if (!editor || !json) return;
+          const incomingVersion = typeof version === 'number' ? version : 0;
+          if (incomingVersion && incomingVersion <= versionRef.current) return;
+          if (incomingVersion) versionRef.current = incomingVersion;
+
           applyingRemoteRef.current = true;
           editor.commands.setContent(json);
           setTimeout(() => { applyingRemoteRef.current = false; }, 30);
@@ -388,20 +542,7 @@ export default function EditorPage() {
 
   // Auto-save
   useEffect(() => {
-    const iv = setInterval(async () => {
-      if (!editor) return;
-      try {
-        const json = editor.getJSON();
-        await api.put(`/documents/${documentId}`, { data: json, title: docTitle });
-        setLastSaved(new Date());
-        if (socketRef.current?.connected) {
-          socketRef.current.emit('save-document', { documentId, data: json });
-        }
-      } catch (err) {
-        console.warn('Auto-save failed', err);
-      }
-    }, 30000);
-    return () => clearInterval(iv);
+    return () => void 0;
   }, [documentId, editor, docTitle]);
 
   // Selection tracking
@@ -444,14 +585,13 @@ export default function EditorPage() {
       try {
         logout();
       } catch {
-        try { clearToken(); } catch { void 0; }
+        void 0;
       }
 
       navigate('/login');
       toast.success('Logged out');
     } catch (e) {
       console.warn('Socket disconnect error', e);
-      try { clearToken(); } catch { void 0; }
       try { navigate('/login'); } catch { void 0; }
       toast.success('Logged out');
     }

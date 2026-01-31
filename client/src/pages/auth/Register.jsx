@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Toaster, toast } from 'react-hot-toast';
 import { Eye, EyeOff, Mail, Lock, User, Loader2, FileText, CheckCircle2 } from 'lucide-react';
 import api from '@/services/api';
+import { useAuthStore } from '@/stores/authStore';
 
 const registerSchema = z.object({
   name: z.string().min(1, 'Name is required').min(2, 'Name must be at least 2 characters'),
@@ -20,6 +21,8 @@ const registerSchema = z.object({
 
 export default function Register() {
   const navigate = useNavigate();
+  const setUser = useAuthStore((s) => s.setUser);
+  const setStatus = useAuthStore((s) => s.setStatus);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -35,13 +38,16 @@ export default function Register() {
   async function onSubmit(data) {
     setIsLoading(true);
     try {
-      await api.post('/auth/register', { 
+      const res = await api.post('/auth/signup', { 
         name: data.name.trim(), 
         email: data.email.trim(), 
         password: data.password 
       });
+      const u = res.data?.user || null;
+      setUser(u);
+      setStatus('authenticated');
       toast.success('Account created successfully!');
-      setTimeout(() => navigate('/login'), 1000);
+      setTimeout(() => navigate('/docs'), 200);
     } catch (err) {
       const msg = err?.response?.data?.error || err?.response?.data?.errors?.[0]?.msg || err.message;
       toast.error(typeof msg === 'string' ? msg : 'Registration failed');

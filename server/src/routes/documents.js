@@ -13,7 +13,7 @@ const auth = require('../middleware/auth'); // simple JWT middleware
 // create document
 router.post('/', auth, async (req, res) => {
   const { title } = req.body;
-  const doc = new Document({ title: title || 'Untitled', owner: req.user.id });
+  const doc = new Document({ title: title || 'Untitled', owner: req.user.id, version: 1 });
   await doc.save();
   res.status(201).json(doc);
 });
@@ -41,7 +41,7 @@ router.get('/:id', auth, async (req, res) => {
 
 // update/save
 router.put('/:id', auth, async (req, res) => {
-  const { data, title } = req.body;
+  const { data, title, baseVersion } = req.body;
   const doc = await Document.findById(req.params.id);
   if(!doc) return res.status(404).json({ error: 'Not found' });
 
@@ -52,8 +52,14 @@ router.put('/:id', auth, async (req, res) => {
     );
   }
 
+  const currentVersion = typeof doc.version === 'number' ? doc.version : 0;
+  if (typeof baseVersion === 'number' && baseVersion !== currentVersion) {
+    return res.status(409).json({ error: 'stale', doc });
+  }
+
   if (data) doc.data = data;
   if (title) doc.title = title;
+  doc.version = currentVersion + 1;
   await doc.save();
   res.json(doc);
 });

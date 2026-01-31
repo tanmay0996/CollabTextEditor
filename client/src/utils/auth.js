@@ -1,11 +1,10 @@
 // src/utils/auth.js
 export function saveToken(token) {
-  if (!token) return;
-  localStorage.setItem('token', token);
+  void token;
 }
 export function getToken() {
-  return localStorage.getItem('token');
+  return null;
 }
 export function clearToken() {
-  localStorage.removeItem('token');
+  return;
 }

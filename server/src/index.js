@@ -3,6 +3,7 @@ const express = require('express');
 const http = require('http');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 const socketio = require('socket.io');
 require('dotenv').config();
 
@@ -39,6 +40,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));   // ⭐ GLOBAL CORS HANDLER
+app.use(cookieParser());
 app.use(express.json());
 
 /* Optional: health check */
@@ -57,6 +59,7 @@ const io = socketio(server, {
   cors: {
     origin: allowedOrigins,
     methods: ['GET', 'POST'],
+    credentials: true,
   }
 });
 socketHandler(io);
