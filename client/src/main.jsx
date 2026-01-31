@@ -1,10 +1,22 @@
-// client/src/main.jsx
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, useNavigate } from 'react-router-dom';
 import App from './App';
 import './index.css';
-// window.env = import.meta.env;
+
+import { AuthProvider } from '@/auth/AuthProvider';
+import { setNavigate } from '@/services/navigation';
+
+function NavigationBridge({ children }) {
+  const navigate = useNavigate();
+
+  React.useEffect(() => {
+    setNavigate(navigate);
+    return () => setNavigate(null);
+  }, [navigate]);
+
+  return children;
+}
 
 const container = document.getElementById('root');
 if (!container) throw new Error('Root element #root not found in index.html');
@@ -12,7 +24,11 @@ if (!container) throw new Error('Root element #root not found in index.html');
 createRoot(container).render(
   <React.StrictMode>
     <BrowserRouter>
-      <App />
+      <NavigationBridge>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </NavigationBridge>
     </BrowserRouter>
   </React.StrictMode>
 );

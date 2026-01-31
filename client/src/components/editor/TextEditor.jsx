@@ -2,31 +2,39 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Quill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-import { createSocket } from '@/services/socket';
-import axios from 'axios';
+import { connectSocket } from '@/services/socket';
+import api from '@/services/api';
 
-export default function EditorPage({ documentId, token }) {
+export default function EditorPage({ documentId }) {
   const [quill, setQuill] = useState(null);
   const socketRef = useRef(null);
 
   useEffect(() => {
-    const s = createSocket(token);
-    socketRef.current = s;
-    s.connect();
+    let mounted = true;
+    let s;
 
-    s.on('connect', () => console.log('socket connected in client', s.id));
-    s.on('document-data', (data) => {
-      if (quill) quill.setContents(data);
-    });
+    (async () => {
+      try {
+        s = await connectSocket();
+        if (!mounted) return;
+        socketRef.current = s;
+        s.on('connect', () => console.log('socket connected in client', s.id));
+        s.on('document-data', (data) => {
+          if (quill) quill.setContents(data);
+        });
 
-    s.on('remote-text-change', delta => {
-      if (quill) quill.updateContents(delta);
-    });
-
+        s.on('remote-text-change', (delta) => {
+          if (quill) quill.updateContents(delta);
+        });
+      } catch (err) {
+        console.warn('socket connect failed', err);
+      }
+    })();
     return () => {
-      s.disconnect();
+      mounted = false;
+      try { s?.disconnect(); } catch { /* ignore */ }
     };
-  }, [quill, token]);
+  }, [quill]);
 
   useEffect(() => {
     if (!quill || !socketRef.current) return;
@@ -44,15 +52,12 @@ export default function EditorPage({ documentId, token }) {
       const data = quill.getContents();
       socketRef.current.emit('save-document', { documentId, data });
       // also persist via HTTP for reliability
-      const base = import.meta.env.VITE_REACT_APP_SERVER_URL || 'http://localhost:8000';
-      axios.put(`${base}/api/documents/${documentId}`, { data }, {
-        headers: { Authorization: `Bearer ${token}` }
-      }).catch(()=>{/* ignore */});
+      api.put(`/documents/${documentId}`, { data }).catch(() => { /* ignore */ });
     }, 30000);
 
     return () => { quill.off('text-change', handler); clearInterval(interval); };
 
-  }, [quill, documentId, token]);
+  }, [quill, documentId]);
 
   return <div>
     <Quill theme="snow" ref={(el) => setQuill(el && el.getEditor())} />

@@ -1,8 +1,7 @@
 // src/pages/DocumentsList.jsx
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import api, { setAuthToken } from '@/services/api';
-import { getToken } from '@/utils/auth';
+import api from '@/services/api';
 import {
   FileText,
   Loader2,
@@ -21,23 +20,20 @@ export default function DocumentsList() {
   const nav = useNavigate();
 
   useEffect(() => {
-    const token = getToken();
-    if (token) setAuthToken(token);
-
     let cancelled = false;
     async function load() {
       try {
         const res = await api.get('/documents');
         if (!cancelled) setDocs(res.data || []);
       } catch (err) {
-        if (err?.response?.status === 401) nav('/login');
+        void 0;
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
     load();
     return () => { cancelled = true; };
-  }, [nav]);
+  }, []);
 
   async function createDoc(e) {
     e.preventDefault();

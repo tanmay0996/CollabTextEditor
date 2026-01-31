@@ -7,14 +7,16 @@ import {
   Menu, X, Save, Eye, EyeOff, ChevronDown, User, LogOut, 
   FileText, Sparkles, PanelRightClose, PanelRight
 } from 'lucide-react';
-import api, { setAuthToken } from '@/services/api';
-import { getToken, clearToken } from '@/utils/auth';
-import { createSocket } from '@/services/socket';
+import api from '@/services/api';
+import { clearToken } from '@/utils/auth';
+import { connectSocket } from '@/services/socket';
 import AIWritingAssistant from '@/components/editor/AIWritingAssistant';
+import { useAuth } from '@/auth/AuthProvider';
 
 export default function EditorPage() {
   const { id: documentId } = useParams();
   const navigate = useNavigate();
+  const { logout } = useAuth();
   const [status, setStatus] = useState('loading');
   const [docTitle, setDocTitle] = useState('Untitled Document');
   const [wordCount, setWordCount] = useState(0);
@@ -316,8 +318,6 @@ export default function EditorPage() {
     async function loadDoc() {
       setStatus('loading');
       try {
-        const token = getToken();
-        if (token) setAuthToken(token);
         const res = await api.get(`/documents/${documentId}`);
         if (cancelled) return;
         const serverData = res.data?.data;
@@ -344,33 +344,46 @@ export default function EditorPage() {
 
   // Socket setup
   useEffect(() => {
-    const token = getToken();
-    const socket = createSocket(token);
-    socketRef.current = socket;
-    socket.connect();
-    socket.on('connect', () => socket.emit('join-document', { documentId }));
-    socket.on('document-title', (title) => {
-      if (typeof title === 'string' && title.trim()) setDocTitle(title);
-    });
-    socket.on('document-data', (payload) => {
-      if (!editor) return;
-      applyingRemoteRef.current = true;
+    let mounted = true;
+    let socket;
+
+    (async () => {
       try {
-        if (payload?.json) editor.commands.setContent(payload.json);
-        else if (payload) editor.commands.setContent(payload);
-      } catch {
-        void 0;
+        socket = await connectSocket();
+        if (!mounted) return;
+        socketRef.current = socket;
+        socket.on('connect', () => socket.emit('join-document', { documentId }));
+        socket.on('document-title', (title) => {
+          if (typeof title === 'string' && title.trim()) setDocTitle(title);
+        });
+        socket.on('document-data', (payload) => {
+          if (!editor) return;
+          applyingRemoteRef.current = true;
+          try {
+            if (payload?.json) editor.commands.setContent(payload.json);
+            else if (payload) editor.commands.setContent(payload);
+          } catch {
+            void 0;
+          }
+          applyingRemoteRef.current = false;
+          setStatus('ready');
+        });
+        socket.on('remote-editor-update', ({ json }) => {
+          if (!editor || !json) return;
+          applyingRemoteRef.current = true;
+          editor.commands.setContent(json);
+          setTimeout(() => { applyingRemoteRef.current = false; }, 30);
+        });
+      } catch (err) {
+        console.warn('Failed to connect socket', err);
       }
-      applyingRemoteRef.current = false;
-      setStatus('ready');
-    });
-    socket.on('remote-editor-update', ({ json }) => {
-      if (!editor || !json) return;
-      applyingRemoteRef.current = true;
-      editor.commands.setContent(json);
-      setTimeout(() => { applyingRemoteRef.current = false; }, 30);
-    });
-    return () => socket?.disconnect();
+    })();
+
+    return () => {
+      mounted = false;
+      try { socket?.disconnect(); } catch { void 0; }
+      if (socketRef.current === socket) socketRef.current = null;
+    };
   }, [documentId, editor]);
 
   // Auto-save
@@ -427,27 +440,17 @@ export default function EditorPage() {
       } catch (e) {
         console.warn('Socket disconnect error', e);
       }
-  
-      // Clear token from storage
-      clearToken();
-  
-      // Remove auth header from api client
-      if (typeof setAuthToken === 'function') {
-        try {
-          setAuthToken(null); // if your helper supports null to remove header
-        } catch {
-          if (api?.defaults?.headers?.common) delete api.defaults.headers.common['Authorization'];
-        }
-      } else {
-        if (api?.defaults?.headers?.common) delete api.defaults.headers.common['Authorization'];
+
+      try {
+        logout();
+      } catch {
+        try { clearToken(); } catch { void 0; }
       }
-  
-      // Navigate to login page
+
       navigate('/login');
       toast.success('Logged out');
-    } catch (err) {
-      console.error('Logout error', err);
-      // fallback: try to at least clear local token and navigate
+    } catch (e) {
+      console.warn('Socket disconnect error', e);
       try { clearToken(); } catch { void 0; }
       try { navigate('/login'); } catch { void 0; }
       toast.success('Logged out');

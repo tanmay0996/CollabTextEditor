@@ -1,13 +1,12 @@
 // client/src/pages/Login.jsx
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Toaster, toast } from 'react-hot-toast';
 import { Eye, EyeOff, Mail, Lock, Loader2, FileText } from 'lucide-react';
-import api, { setAuthToken } from '@/services/api';
-import { saveToken } from '@/utils/auth';
+import { useAuth } from '@/auth/AuthProvider';
 
 const loginSchema = z.object({
   email: z.string().min(1, 'Email is required').email('Enter a valid email'),
@@ -15,7 +14,9 @@ const loginSchema = z.object({
 });
 
 export default function Login() {
+  const location = useLocation();
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -27,15 +28,10 @@ export default function Login() {
   async function onSubmit(data) {
     setIsLoading(true);
     try {
-      const response = await api.post('/auth/login', data);
-      if (response.data?.token) {
-        saveToken(response.data.token);
-        setAuthToken(response.data.token);
-        toast.success('Welcome back!');
-        setTimeout(() => navigate('/docs'), 500);
-      } else {
-        toast.error('Login failed: no token returned');
-      }
+      await login(data.email, data.password);
+      toast.success('Welcome back!');
+      const returnTo = location.state?.returnTo;
+      setTimeout(() => navigate(typeof returnTo === 'string' && returnTo ? returnTo : '/docs'), 200);
     } catch (err) {
       const msg = err?.response?.data?.error || err?.response?.data?.errors?.[0]?.msg || err.message;
       toast.error(typeof msg === 'string' ? msg : 'Login failed');

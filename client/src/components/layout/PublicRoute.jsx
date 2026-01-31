@@ -1,12 +1,17 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
-import { getToken } from '@/utils/auth';
+import { useAuth } from '@/auth/AuthProvider';
 
 export default function PublicRoute({ children }) {
-  const token = getToken();
-  if (token) {
-    // already signed in -> go to documents
+  const { status } = useAuth();
+
+  if (status === 'unknown') {
+    return null;
+  }
+
+  if (status === 'authenticated') {
     return <Navigate to="/docs" replace />;
   }
+
   return children;
 }
