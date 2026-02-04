@@ -11,11 +11,16 @@ import api from '@/services/api';
 import { connectSocket } from '@/services/socket';
 import AIWritingAssistant from '@/components/editor/AIWritingAssistant';
 import { useAuth } from '@/auth/AuthProvider';
+import { useAuthStore } from '@/stores/authStore';
+import { usePresenceStore } from '@/stores/presenceStore';
+import CollaboratorAvatars from '@/components/editor/CollaboratorAvatars';
+import { RemoteCursorsExtension } from '@/components/editor/tiptapRemoteCursors';
 
 export default function EditorPage() {
   const { id: documentId } = useParams();
   const navigate = useNavigate();
   const { logout } = useAuth();
+  const selfUserId = useAuthStore((s) => s.user?.id) || null;
   const [status, setStatus] = useState('loading');
   const [docTitle, setDocTitle] = useState('Untitled Document');
   const [wordCount, setWordCount] = useState(0);
@@ -42,6 +47,12 @@ export default function EditorPage() {
   const inFlightRef = useRef(false);
   const queuedJsonRef = useRef(null);
   const pendingRemoteRef = useRef(null);
+  const cursorThrottleRef = useRef({ lastSent: 0, lastPayload: null, timer: null });
+
+  const presenceUsers = usePresenceStore((s) => s.users);
+  const setPresence = usePresenceStore((s) => s.setPresence);
+  const updateCursor = usePresenceStore((s) => s.updateCursor);
+  const resetPresence = usePresenceStore((s) => s.resetPresence);
 
   const emitDocEdit = useCallback((json) => {
     const socket = socketRef.current;
@@ -57,7 +68,13 @@ export default function EditorPage() {
   }, [documentId]);
 
   const editor = useEditor({
-    extensions: [StarterKit],
+    extensions: [
+      StarterKit,
+      RemoteCursorsExtension({
+        getPresence: () => ({ users: usePresenceStore.getState().users, cursors: usePresenceStore.getState().cursors }),
+        selfUserId,
+      }),
+    ],
     content: '',
     autofocus: true,
     onUpdate: ({ editor }) => {
@@ -392,8 +409,16 @@ export default function EditorPage() {
         socket = await connectSocket();
         if (!mounted) return;
         socketRef.current = socket;
+        const join = () => {
+          try {
+            socket.emit('join-document', { documentId });
+          } catch {
+            void 0;
+          }
+        };
+
         socket.on('connect', async () => {
-          socket.emit('join-document', { documentId });
+          join();
           try {
             const res = await api.get(`/documents/${documentId}`);
             const incomingVersion = typeof res.data?.version === 'number' ? res.data.version : 0;
@@ -528,6 +553,36 @@ export default function EditorPage() {
           editor.commands.setContent(json);
           setTimeout(() => { applyingRemoteRef.current = false; }, 30);
         });
+
+        const forceRemoteCursorRerender = () => {
+          try {
+            if (!editor?.view) return;
+            const tr = editor.state.tr.setMeta('addToHistory', false);
+            editor.view.dispatch(tr);
+          } catch {
+            void 0;
+          }
+        };
+
+        socket.on('doc:presence:update', ({ documentId: incomingDocId, users }) => {
+          if (incomingDocId !== documentId) return;
+          setPresence(users || []);
+          forceRemoteCursorRerender();
+          try {
+            console.log('[presence] update', { documentId: incomingDocId, count: Array.isArray(users) ? users.length : 0 });
+          } catch {
+            void 0;
+          }
+        });
+
+        socket.on('doc:cursor:update', ({ documentId: incomingDocId, userId, cursorPos }) => {
+          if (incomingDocId !== documentId) return;
+          if (!userId) return;
+          updateCursor(String(userId), cursorPos || null);
+          forceRemoteCursorRerender();
+        });
+
+        if (socket.connected) join();
       } catch (err) {
         console.warn('Failed to connect socket', err);
       }
@@ -535,8 +590,14 @@ export default function EditorPage() {
 
     return () => {
       mounted = false;
+      try {
+        socket?.emit('leave-document', { documentId });
+      } catch {
+        void 0;
+      }
       try { socket?.disconnect(); } catch { void 0; }
       if (socketRef.current === socket) socketRef.current = null;
+      resetPresence();
     };
   }, [documentId, editor]);
 
@@ -553,10 +614,40 @@ export default function EditorPage() {
       const text = from !== to ? editor.state.doc.textBetween(from, to, ' ').trim() : '';
       selectionRef.current = text;
       setSelectionText(text);
+
+      const socket = socketRef.current;
+      if (!socket?.connected) return;
+      if (!selfUserId) return;
+      const now = Date.now();
+      const payload = { documentId, cursorPos: { from, to } };
+      cursorThrottleRef.current.lastPayload = payload;
+
+      const send = () => {
+        const latest = cursorThrottleRef.current.lastPayload;
+        if (!latest) return;
+        cursorThrottleRef.current.lastSent = Date.now();
+        try {
+          socket.emit('doc:cursor:update', latest);
+        } catch {
+          void 0;
+        }
+      };
+
+      if (now - cursorThrottleRef.current.lastSent < 80) {
+        if (!cursorThrottleRef.current.timer) {
+          cursorThrottleRef.current.timer = setTimeout(() => {
+            cursorThrottleRef.current.timer = null;
+            send();
+          }, 90);
+        }
+        return;
+      }
+
+      send();
     };
     editor.on('selectionUpdate', handleSelection);
     return () => editor.off('selectionUpdate', handleSelection);
-  }, [editor]);
+  }, [editor, documentId, selfUserId]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -633,6 +724,7 @@ export default function EditorPage() {
           
           {/* Right: Actions */}
           <div className="flex items-center gap-2">
+            <CollaboratorAvatars users={presenceUsers} selfUserId={selfUserId} />
             {/* <button onClick={() => setFocusMode(!focusMode)} className={`p-2 rounded-lg transition-colors ${focusMode ? 'bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`} title={focusMode ? 'Exit focus mode' : 'Focus mode (Ctrl+Shift+F)'}>
               {focusMode ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
             </button> */}
