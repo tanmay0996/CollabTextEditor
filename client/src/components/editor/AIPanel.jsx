@@ -1,16 +1,13 @@
 // client/src/components/AIPanel.jsx
 import React, { useState } from 'react';
-import axios from 'axios';
+import api from '@/services/api';
 
 export default function AIPanel({ token }) {
   const [text, setText] = useState('');
   const [resp, setResp] = useState(null);
 
   async function grammarCheck() {
-    const { data } = await axios.post(`${import.meta.env.VITE_REACT_APP_SERVER_URL
-    }/api/ai/grammar-check`, { text }, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const { data } = await api.post('/ai/grammar-check', { text });
     setResp(data);
   }
 

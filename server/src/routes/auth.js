@@ -12,8 +12,8 @@ function setSessionCookie(res, token) {
   const isProd = process.env.NODE_ENV === 'production';
   res.cookie('sid', token, {
     httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'strict' : 'lax',
+    secure: isProd,                   // HTTPS only in production
+    sameSite: isProd ? 'none' : 'lax', // 'none' is REQUIRED for cross-origin cookies
     path: '/',
   });
 }
@@ -22,8 +22,8 @@ function clearSessionCookie(res) {
   const isProd = process.env.NODE_ENV === 'production';
   res.cookie('sid', '', {
     httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'strict' : 'lax',
+    secure: isProd,                   // HTTPS only in production
+    sameSite: isProd ? 'none' : 'lax', // must match setSessionCookie
     path: '/',
     maxAge: 0,
   });

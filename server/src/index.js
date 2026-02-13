@@ -14,15 +14,20 @@ const { socketHandler } = require('./websockets');
 
 const app = express();
 
+// Trust the first reverse proxy (Render, Railway, etc.)
+// Required so Express recognises HTTPS (via X-Forwarded-Proto) and
+// correctly sets `secure` cookies behind a proxy.
+app.set('trust proxy', 1);
+
 /* -------------------- CORS CONFIG -------------------- */
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
   : [
-      process.env.FRONTEND_URL || 'http://localhost:5173',
-      'http://localhost:5173',
-      'http://localhost:3000'
-    ];
+    process.env.FRONTEND_URL || 'http://localhost:5173',
+    'http://localhost:5173',
+    'http://localhost:3000'
+  ];
 
 const corsOptions = {
   origin: (origin, callback) => {
