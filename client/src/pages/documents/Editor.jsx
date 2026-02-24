@@ -10,6 +10,9 @@ import {
 import api from '@/services/api';
 import { connectSocket } from '@/services/socket';
 import AIWritingAssistant from '@/components/editor/AIWritingAssistant';
+import VoiceRecorder from '@/components/editor/VoiceRecorder';
+import { useVoiceStore } from '@/stores/voiceStore';
+import { voiceLogger } from '@/utils/voiceLogger';
 import { useAuth } from '@/auth/AuthProvider';
 
 export default function EditorPage() {
@@ -42,6 +45,8 @@ export default function EditorPage() {
   const inFlightRef = useRef(false);
   const queuedJsonRef = useRef(null);
   const pendingRemoteRef = useRef(null);
+  const voiceAnchorRef = useRef(null);
+  const voiceInsertedLenRef = useRef(0);
 
   const emitDocEdit = useCallback((json) => {
     const socket = socketRef.current;
@@ -570,6 +575,95 @@ export default function EditorPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [saveDocument]);
 
+  // --- Voice: live interim updates ---
+  const handleVoiceInterim = useCallback((text) => {
+    if (!editor || !text) return;
+
+    try {
+      // First interim call → save anchor position
+      if (voiceAnchorRef.current === null) {
+        voiceAnchorRef.current = editor.state.selection.from;
+        voiceInsertedLenRef.current = 0;
+        voiceLogger.debug('voice:anchorSet', { pos: voiceAnchorRef.current });
+      }
+
+      const anchor = voiceAnchorRef.current;
+      const prevLen = voiceInsertedLenRef.current;
+
+      // Safety: don't go past document end
+      const docSize = editor.state.doc.content.size;
+      if (anchor + prevLen > docSize) {
+        voiceLogger.warn('voice:positionOverflow', { anchor, prevLen, docSize });
+        return;
+      }
+
+      if (prevLen > 0) {
+        editor.chain()
+          .deleteRange({ from: anchor, to: anchor + prevLen })
+          .insertContentAt(anchor, text)
+          .run();
+      } else {
+        editor.commands.insertContentAt(anchor, text);
+      }
+
+      voiceInsertedLenRef.current = text.length;
+    } catch (err) {
+      voiceLogger.warn('voice:interimError', { message: err.message });
+    }
+  }, [editor]);
+
+  // --- Voice: final transcript → Gemini cleanup → replace ---
+  const handleVoiceFinal = useCallback(async (rawText) => {
+    if (!editor || !rawText) {
+      voiceAnchorRef.current = null;
+      voiceInsertedLenRef.current = 0;
+      return;
+    }
+
+    const { startCleaning, finishCleaning, stopRecording } = useVoiceStore.getState();
+    stopRecording();
+
+    const opened = voiceLogger.group('voice:cleanup');
+    voiceLogger.info('clean:start', { rawLen: rawText.length });
+    startCleaning();
+
+    try {
+      const res = await api.post('/voice/clean', { text: rawText });
+      const cleaned = res.data?.cleaned?.trim();
+
+      if (cleaned && voiceAnchorRef.current !== null) {
+        const anchor = voiceAnchorRef.current;
+        const prevLen = voiceInsertedLenRef.current;
+        const docSize = editor.state.doc.content.size;
+
+        if (anchor + prevLen <= docSize) {
+          editor.chain()
+            .deleteRange({ from: anchor, to: anchor + prevLen })
+            .insertContentAt(anchor, cleaned)
+            .run();
+          voiceInsertedLenRef.current = cleaned.length;
+          voiceLogger.info('clean:done', { rawLen: rawText.length, cleanLen: cleaned.length });
+        }
+      }
+    } catch (err) {
+      voiceLogger.warn('clean:failed', { message: err.message });
+      // Raw text stays in editor — acceptable fallback
+    } finally {
+      finishCleaning();
+
+      // Broadcast the final state to collaborators
+      try {
+        const json = editor.getJSON();
+        emitDocEdit(json);
+        voiceLogger.debug('socket:emit', { event: 'doc:edit' });
+      } catch { void 0; }
+
+      voiceAnchorRef.current = null;
+      voiceInsertedLenRef.current = 0;
+      if (opened) voiceLogger.groupEnd();
+    }
+  }, [editor, emitDocEdit]);
+
   const handleLogout = () => {
     try {
       // Disconnect realtime socket if active
@@ -636,6 +730,7 @@ export default function EditorPage() {
             {/* <button onClick={() => setFocusMode(!focusMode)} className={`p-2 rounded-lg transition-colors ${focusMode ? 'bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`} title={focusMode ? 'Exit focus mode' : 'Focus mode (Ctrl+Shift+F)'}>
               {focusMode ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
             </button> */}
+            <VoiceRecorder onInterim={handleVoiceInterim} onFinal={handleVoiceFinal} disabled={status !== 'ready'} />
             <button onClick={saveDocument} disabled={isSaving} className="hidden md:flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors text-sm font-medium" title="Save (Ctrl+S)">
               <Save className="w-4 h-4" />
               Save

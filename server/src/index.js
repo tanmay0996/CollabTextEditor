@@ -10,6 +10,7 @@ require('dotenv').config();
 const authRoutes = require('./routes/auth');
 const docRoutes = require('./routes/documents');
 const aiRoutes = require('./routes/ai');
+const voiceRoutes = require('./routes/voice');
 const { socketHandler } = require('./websockets');
 
 const app = express();
@@ -57,6 +58,7 @@ app.get('/healthz', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/documents', docRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/voice', voiceRoutes);
 
 /* -------------------- SOCKET.IO -------------------- */
 const server = http.createServer(app);
