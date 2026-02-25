@@ -612,6 +612,29 @@ export default function EditorPage() {
     }
   }, [editor]);
 
+  // --- Voice: cancel → remove interim text, discard ---
+  const handleVoiceCancel = useCallback(() => {
+    if (!editor) return;
+    voiceLogger.info('voice:cancel');
+
+    // Remove whatever interim text was inserted
+    const anchor = voiceAnchorRef.current;
+    const prevLen = voiceInsertedLenRef.current;
+    if (anchor !== null && prevLen > 0) {
+      const docSize = editor.state.doc.content.size;
+      if (anchor + prevLen <= docSize) {
+        editor.chain()
+          .deleteRange({ from: anchor, to: anchor + prevLen })
+          .run();
+        voiceLogger.debug('voice:cancelledTextRemoved', { anchor, len: prevLen });
+      }
+    }
+
+    voiceAnchorRef.current = null;
+    voiceInsertedLenRef.current = 0;
+    toast('Dictation cancelled', { icon: '🚫', duration: 2000 });
+  }, [editor]);
+
   // --- Voice: final transcript → Gemini cleanup → replace ---
   const handleVoiceFinal = useCallback(async (rawText) => {
     if (!editor || !rawText) {
@@ -645,8 +668,11 @@ export default function EditorPage() {
           voiceLogger.info('clean:done', { rawLen: rawText.length, cleanLen: cleaned.length });
         }
       }
+
+      toast.success('Voice text cleaned & inserted', { duration: 2000, icon: '✨' });
     } catch (err) {
       voiceLogger.warn('clean:failed', { message: err.message });
+      toast('Kept raw transcript (cleanup unavailable)', { icon: '⚠️', duration: 3000 });
       // Raw text stays in editor — acceptable fallback
     } finally {
       finishCleaning();
@@ -730,7 +756,7 @@ export default function EditorPage() {
             {/* <button onClick={() => setFocusMode(!focusMode)} className={`p-2 rounded-lg transition-colors ${focusMode ? 'bg-gray-700 text-gray-300' : 'hover:bg-gray-100 text-gray-600'}`} title={focusMode ? 'Exit focus mode' : 'Focus mode (Ctrl+Shift+F)'}>
               {focusMode ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
             </button> */}
-            <VoiceRecorder onInterim={handleVoiceInterim} onFinal={handleVoiceFinal} disabled={status !== 'ready'} />
+            <VoiceRecorder onInterim={handleVoiceInterim} onFinal={handleVoiceFinal} onCancel={handleVoiceCancel} disabled={status !== 'ready'} />
             <button onClick={saveDocument} disabled={isSaving} className="hidden md:flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors text-sm font-medium" title="Save (Ctrl+S)">
               <Save className="w-4 h-4" />
               Save
