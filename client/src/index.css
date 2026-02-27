@@ -9,6 +9,7 @@
     opacity: 0;
     transform: translateY(-10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -23,8 +24,70 @@
 
 /* Waveform bars animation */
 @keyframes voiceBar {
-  0%, 100% { transform: scaleY(0.3); }
-  50% { transform: scaleY(1); }
+
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* --- TipTap / ProseMirror Core Styles --- */
+.ProseMirror {
+  white-space: pre-wrap !important;
+  word-wrap: break-word;
+}
+
+.ProseMirror-focused {
+  outline: none;
+}
+
+/* --- TipTap v3 Collaboration Carets --- */
+.collaboration-carets__caret {
+  position: relative;
+  border-left: 2px solid;
+  border-right: 2px solid;
+  margin-left: -1px;
+  margin-right: -1px;
+  pointer-events: none;
+  word-break: normal;
+  display: inline-block;
+  height: 1.25em;
+  vertical-align: middle;
+  z-index: 50;
+  /* Ensure it's above text */
+}
+
+.collaboration-carets__label {
+  position: absolute;
+  top: -1.4em;
+  left: -2px;
+  padding: 1px 6px;
+  border-radius: 4px 4px 4px 0;
+  font-size: 11px;
+  font-family: sans-serif;
+  font-weight: 700;
+  line-height: normal;
+  white-space: nowrap;
+  color: #fff;
+  user-select: none;
+  pointer-events: none;
+  z-index: 100;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: opacity 0.3s ease;
+}
+
+/* Hide label after 3 seconds of inactivity (optional but nice) */
+.collaboration-carets__caret:not(:hover) .collaboration-carets__label {
+  /* opacity: 0.8; */
+}
+
+/* Selection highlights */
+.yjs-selection {
+  background-color: rgba(100, 150, 255, 0.3);
 }
 
 .voice-bar {
@@ -36,16 +99,39 @@
   animation: voiceBar 0.8s ease-in-out infinite;
 }
 
-.voice-bar:nth-child(1) { animation-delay: 0s; }
-.voice-bar:nth-child(2) { animation-delay: 0.15s; }
-.voice-bar:nth-child(3) { animation-delay: 0.3s; }
-.voice-bar:nth-child(4) { animation-delay: 0.45s; }
-.voice-bar:nth-child(5) { animation-delay: 0.1s; }
+.voice-bar:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.voice-bar:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.voice-bar:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.voice-bar:nth-child(4) {
+  animation-delay: 0.45s;
+}
+
+.voice-bar:nth-child(5) {
+  animation-delay: 0.1s;
+}
 
 /* Pulsing recording dot */
 @keyframes recordPulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.8); }
+
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
 }
 
 .voice-record-dot {
@@ -58,27 +144,35 @@
 
 /* Shimmer effect for processing state */
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 .voice-shimmer {
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(59, 130, 246, 0.08) 40%,
-    rgba(59, 130, 246, 0.15) 50%,
-    rgba(59, 130, 246, 0.08) 60%,
-    transparent 100%
-  );
+  background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(59, 130, 246, 0.08) 40%,
+      rgba(59, 130, 246, 0.15) 50%,
+      rgba(59, 130, 246, 0.08) 60%,
+      transparent 100%);
   background-size: 200% 100%;
   animation: shimmer 2s ease-in-out infinite;
 }
 
 /* Success highlight fade */
 @keyframes highlightFade {
-  0% { background-color: rgba(34, 197, 94, 0.2); }
-  100% { background-color: transparent; }
+  0% {
+    background-color: rgba(34, 197, 94, 0.2);
+  }
+
+  100% {
+    background-color: transparent;
+  }
 }
 
 .voice-highlight-fade {
@@ -88,13 +182,27 @@
 
 /* Slide-down panel animation */
 @keyframes slideDown {
-  from { opacity: 0; transform: translateY(-8px) scale(0.96); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 @keyframes slideUp {
-  from { opacity: 1; transform: translateY(0) scale(1); }
-  to { opacity: 0; transform: translateY(-8px) scale(0.96); }
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
 }
 
 .voice-panel-enter {
@@ -107,9 +215,17 @@
 
 /* Ring pulse for mic button active state */
 @keyframes ringPulse {
-  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-  70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+
+  70% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
 }
 
 .voice-ring-pulse {
@@ -118,8 +234,15 @@
 
 /* Tooltip animation */
 @keyframes tooltipFade {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .voice-tooltip {
@@ -128,6 +251,7 @@
 
 /* Reduce animations for users who prefer reduced motion */
 @media (prefers-reduced-motion: reduce) {
+
   .voice-bar,
   .voice-record-dot,
   .voice-shimmer,
@@ -138,6 +262,7 @@
     animation: none !important;
   }
 }
+
 /* :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
