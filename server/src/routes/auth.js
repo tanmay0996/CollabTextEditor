@@ -46,7 +46,7 @@ async function registerHandler(req, res) {
     await user.save();
 
     const payload = { id: user._id, name: user.name, email: user.email };
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
     setSessionCookie(res, token);
 
     return res.status(201).json({ user: payload });
@@ -96,7 +96,7 @@ router.post(
       if (!isMatch) return res.status(400).json({ error: 'Invalid credentials' });
 
       const payload = { id: user._id, name: user.name, email: user.email };
-      const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '15m' });
+      const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '1h' });
       setSessionCookie(res, token);
 
       return res.json({ user: payload });

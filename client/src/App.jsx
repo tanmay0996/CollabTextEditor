@@ -196,7 +196,8 @@ function MobileMenu() {
 
 export default function App() {
   const [firstTime, setFirstTime] = useState(null);
-  useNavigate();
+  const navigate = useNavigate();
+  import('@/services/navigation').then(m => m.setNavigate(navigate));
 
   useEffect(() => {
     let cancelled = false;

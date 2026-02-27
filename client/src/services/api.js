@@ -11,7 +11,9 @@ let handling401 = false;
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err?.response?.status === 401 && !handling401) {
+    const isAuthMe = err?.config?.url?.includes('/auth/me');
+
+    if (err?.response?.status === 401 && !handling401 && !isAuthMe) {
       handling401 = true;
       try { useAuthStore.getState().logoutLocal(); } catch { void 0; }
 
