@@ -10,12 +10,21 @@ const RATE_LIMIT = Number(process.env.AI_RATE_LIMIT || 60); // Increased from 10
 const MAX_TEXT_LENGTH = Number(process.env.AI_MAX_TEXT || 100000); // Increased from 8000 to 100k
 
 // Model configuration
-// Default model comes from env (gemini-2.5-pro)
-// But we explicitly use Flash for auto-complete (faster, less conservative)
+// Only Flash is available on free tier (Pro shows 0/0 rate limits).
+// Flash is used for all AI features. Auto-complete uses it at higher temperature.
 const MODEL_FLASH = 'gemini-2.5-flash';
 
+const path = require('path');
 const Typo = require('typo-js');
-const dictionary = new Typo('en_US');
+// Must pass an explicit path — without it, typo-js resolves relative to CWD
+// which differs depending on where `node` is invoked from, causing the
+// dictionary to load empty and all words to pass spell-check silently.
+const DICT_PATH = path.join(
+  require.resolve('typo-js'),
+  '../../dictionaries'
+);
+const dictionary = new Typo('en_US', false, false, { dictionaryPath: DICT_PATH });
+console.log('[Grammar] typo-js dictionary loaded from:', DICT_PATH);
 
 const rateBuckets = new Map();
 const apiCallLog = [];
@@ -24,7 +33,7 @@ function logApiCall(userId, endpoint) {
   const now = Date.now();
   apiCallLog.push({ userId, endpoint, timestamp: now });
   if (apiCallLog.length > 100) apiCallLog.shift();
-  
+
   const recentCalls = apiCallLog.filter(call => now - call.timestamp < 60000);
   console.log(`[API Stats] Total calls in last minute: ${recentCalls.length} | User ${userId} called ${endpoint}`);
 }
@@ -61,17 +70,17 @@ function handleGeminiError(err, res) {
 function isTextComplete(text) {
   const trimmed = text.trim();
   if (trimmed.length < 10) return false;
-  
+
   const lastChar = trimmed[trimmed.length - 1];
   const sentenceEnders = ['.', '!', '?', '。', '।'];
-  
+
   if (sentenceEnders.includes(lastChar)) {
     const words = trimmed.split(/\s+/);
     const lastWord = words[words.length - 1];
     if (lastWord.length <= 3) return false;
     return true;
   }
-  
+
   return false;
 }
 
@@ -82,7 +91,7 @@ function isTooShort(text, minLength = 15) {
 async function generateGrammarInsights(text) {
   const words = text.match(/\b[\w']+\b/g) || [];
   const spellingErrors = [];
-  
+
   words.forEach(word => {
     if (!dictionary.check(word)) {
       const suggestions = dictionary.suggest(word);
@@ -95,7 +104,7 @@ async function generateGrammarInsights(text) {
     }
   });
 
-  const spellingContext = spellingErrors.length > 0 
+  const spellingContext = spellingErrors.length > 0
     ? `\n\nSPELLING ERRORS DETECTED: ${spellingErrors.map(e => `"${e.word}" should be "${e.suggestions[0]}"`).join(', ')}`
     : '';
 
@@ -130,36 +139,39 @@ Return JSON with this EXACT structure (NO markdown, NO backticks):
   ]
 }
 
-CRITICAL:
-- If I detected spelling errors above, you MUST include them in corrections array
-- correctedText MUST have ALL errors fixed
-- For each error, provide "original" and "corrected" fields
-- Be thorough and catch all mistakes`;
+CRITICAL RULES (do NOT skip any of these):
+1. If I listed SPELLING ERRORS above, you MUST include every single one in corrections array
+2. correctedText MUST have ALL errors fixed — do not return the original unchanged text
+3. Never say "no errors found" if I detected spelling errors
+4. Be strict and thorough — treat this like a professional proofreader would
+5. Returning an empty corrections array when spelling errors exist is WRONG`;
 
-  // Uses env default model (gemini-2.5-pro)
-  const json = await generateJson(prompt, { 
-    temperature: 0.1, 
-    maxOutputTokens: 4096, // Increased
+  // Grammar check uses Flash (Pro is 0/0 rate limits on free tier).
+  // The prompt forces strict analysis to compensate for Flash's lenient defaults.
+  const json = await generateJson(prompt, {
+    model: MODEL_FLASH,
+    temperature: 0.1,
+    maxOutputTokens: 4096,
   });
-  
+
   if (!json || typeof json !== 'object') {
-    return { 
-      overallScore: 0, 
-      readingEase: 'unknown', 
-      tone: 'unknown', 
+    return {
+      overallScore: 0,
+      readingEase: 'unknown',
+      tone: 'unknown',
       correctedText: text,
-      corrections: [] 
+      corrections: []
     };
   }
-  
+
   if (!Array.isArray(json.corrections)) json.corrections = [];
-  
+
   if (spellingErrors.length > 0) {
     spellingErrors.forEach(error => {
-      const alreadyIncluded = json.corrections.some(c => 
+      const alreadyIncluded = json.corrections.some(c =>
         c.original?.toLowerCase() === error.word.toLowerCase()
       );
-      
+
       if (!alreadyIncluded) {
         json.corrections.push({
           original: error.word,
@@ -171,7 +183,7 @@ CRITICAL:
         });
       }
     });
-    
+
     let corrected = json.correctedText || text;
     spellingErrors.forEach(error => {
       const regex = new RegExp(`\\b${error.word}\\b`, 'gi');
@@ -179,17 +191,17 @@ CRITICAL:
     });
     json.correctedText = corrected;
   }
-  
+
   if (!json.overallScore) json.overallScore = spellingErrors.length > 0 ? 70 : 85;
   if (!json.readingEase) json.readingEase = 'Moderate';
   if (!json.tone) json.tone = 'Conversational';
   if (!json.correctedText) json.correctedText = text;
-  
+
   return json;
 }
 
 async function generateEnhancement(text, selectionProvided) {
-  const context = selectionProvided 
+  const context = selectionProvided
     ? 'This is a selected portion of text. Improve only this selection.'
     : 'This is the complete document. Improve the overall quality.';
 
@@ -217,20 +229,20 @@ Return JSON with this EXACT structure:
 IMPORTANT: The "improved" field must contain the COMPLETE rewritten text, not just changes.`;
 
   // Uses env default model (gemini-2.5-pro)
-  const json = await generateJson(prompt, { 
-    temperature: 0.4, 
+  const json = await generateJson(prompt, {
+    temperature: 0.4,
     maxOutputTokens: 4096,
   });
-  
+
   if (!json || typeof json !== 'object') {
     return { improved: text, tone: 'unknown', rationale: 'Could not generate enhancement' };
   }
-  
+
   if (!json.improved || json.improved.trim().length === 0) {
     json.improved = text;
     json.rationale = 'No improvements needed - text is already well-written.';
   }
-  
+
   return json;
 }
 
@@ -254,11 +266,11 @@ Return JSON with this EXACT structure:
 Make the summary informative and the bullet points specific.`;
 
   // Uses env default model (gemini-2.5-pro)
-  const json = await generateJson(prompt, { 
-    temperature: 0.2, 
+  const json = await generateJson(prompt, {
+    temperature: 0.2,
     maxOutputTokens: 2048,
   });
-  
+
   if (!json || typeof json !== 'object') {
     return { summary: '', bullets: [] };
   }
@@ -285,11 +297,11 @@ Return JSON with this EXACT structure:
 Focus on: structure, content depth, style improvements, engagement, and clarity.`;
 
   // Uses env default model (gemini-2.5-pro)
-  const json = await generateJson(prompt, { 
-    temperature: 0.35, 
+  const json = await generateJson(prompt, {
+    temperature: 0.35,
     maxOutputTokens: 2048,
   });
-  
+
   if (!json || typeof json !== 'object') {
     return { ideas: [] };
   }
@@ -316,41 +328,41 @@ IMPORTANT:
 - Match the writing style and tone`;
 
   // EXPLICITLY use Flash model for auto-complete (faster, less conservative)
-  const json = await generateJson(prompt, { 
+  const json = await generateJson(prompt, {
     model: MODEL_FLASH,  // <-- Uses gemini-2.5-flash instead of env default
-    temperature: 0.7, 
+    temperature: 0.7,
     maxOutputTokens: 1024,
   });
-  
+
   if (!json || typeof json !== 'object') {
     return { completion: '', confidence: 0 };
   }
-  
+
   if (json.completion) {
     json.completion = json.completion.trim();
   }
-  
+
   return json;
 }
 
 // Grammar check endpoint
 router.post('/grammar-check', auth, async (req, res) => {
   const { text = '' } = req.body || {};
-  
+
   if (!text.trim()) {
     return res.status(400).json({ error: 'Text is required', userMessage: 'Please add some text to check grammar.' });
   }
 
   if (isTooShort(text, 10)) {
-    return res.status(400).json({ 
-      error: 'Text too short', 
-      userMessage: 'Please write at least 10 characters for grammar checking.' 
+    return res.status(400).json({
+      error: 'Text too short',
+      userMessage: 'Please write at least 10 characters for grammar checking.'
     });
   }
 
   const userId = pickUserId(req.user);
   logApiCall(userId, '/grammar-check');
-  
+
   if (isRateLimited(userId)) {
     return res.status(429).json({ error: 'Rate limit exceeded. Please wait a moment.' });
   }
@@ -369,24 +381,24 @@ router.post('/grammar-check', auth, async (req, res) => {
 router.post('/enhance-text', auth, async (req, res) => {
   const { text = '', selection = '' } = req.body || {};
   const target = selection?.trim() || text?.trim();
-  
+
   if (!target) {
-    return res.status(400).json({ 
-      error: 'Text required', 
-      userMessage: 'Please write some text or select text to enhance.' 
+    return res.status(400).json({
+      error: 'Text required',
+      userMessage: 'Please write some text or select text to enhance.'
     });
   }
 
   if (isTooShort(target, 15)) {
-    return res.status(400).json({ 
-      error: 'Text too short', 
-      userMessage: 'Please provide at least 15 characters to enhance.' 
+    return res.status(400).json({
+      error: 'Text too short',
+      userMessage: 'Please provide at least 15 characters to enhance.'
     });
   }
 
   const userId = pickUserId(req.user);
   logApiCall(userId, '/enhance-text');
-  
+
   if (isRateLimited(userId)) {
     return res.status(429).json({ error: 'Rate limit exceeded. Please wait a moment.' });
   }
@@ -404,24 +416,24 @@ router.post('/enhance-text', auth, async (req, res) => {
 // Summarize endpoint
 router.post('/summarize', auth, async (req, res) => {
   const { text = '' } = req.body || {};
-  
+
   if (!text.trim()) {
-    return res.status(400).json({ 
-      error: 'Text required', 
-      userMessage: 'Please add some content to summarize.' 
+    return res.status(400).json({
+      error: 'Text required',
+      userMessage: 'Please add some content to summarize.'
     });
   }
 
   if (isTooShort(text, 50)) {
-    return res.status(400).json({ 
-      error: 'Text too short', 
-      userMessage: 'Please write more content (at least 50 characters) for a meaningful summary.' 
+    return res.status(400).json({
+      error: 'Text too short',
+      userMessage: 'Please write more content (at least 50 characters) for a meaningful summary.'
     });
   }
 
   const userId = pickUserId(req.user);
   logApiCall(userId, '/summarize');
-  
+
   if (isRateLimited(userId)) {
     return res.status(429).json({ error: 'Rate limit exceeded. Please wait a moment.' });
   }
@@ -438,24 +450,24 @@ router.post('/summarize', auth, async (req, res) => {
 // Suggestions endpoint
 router.post('/get-suggestions', auth, async (req, res) => {
   const { text = '' } = req.body || {};
-  
+
   if (!text.trim()) {
-    return res.status(400).json({ 
-      error: 'Text required', 
-      userMessage: 'Please write some content to get suggestions.' 
+    return res.status(400).json({
+      error: 'Text required',
+      userMessage: 'Please write some content to get suggestions.'
     });
   }
 
   if (isTooShort(text, 30)) {
-    return res.status(400).json({ 
-      error: 'Text too short', 
-      userMessage: 'Please write more content (at least 30 characters) to get meaningful suggestions.' 
+    return res.status(400).json({
+      error: 'Text too short',
+      userMessage: 'Please write more content (at least 30 characters) to get meaningful suggestions.'
     });
   }
 
   const userId = pickUserId(req.user);
   logApiCall(userId, '/get-suggestions');
-  
+
   if (isRateLimited(userId)) {
     return res.status(429).json({ error: 'Rate limit exceeded. Please wait a moment.' });
   }
@@ -472,46 +484,46 @@ router.post('/get-suggestions', auth, async (req, res) => {
 // Auto-complete endpoint
 router.post('/auto-complete', auth, async (req, res) => {
   const { text = '', cursor } = req.body || {};
-  
+
   if (!text.trim()) {
-    return res.status(400).json({ 
-      error: 'Text required', 
-      userMessage: 'Start typing to get auto-completion suggestions.' 
+    return res.status(400).json({
+      error: 'Text required',
+      userMessage: 'Start typing to get auto-completion suggestions.'
     });
   }
 
   if (isTooShort(text, 10)) {
-    return res.status(400).json({ 
-      error: 'Text too short', 
-      userMessage: 'Write at least a few words before using auto-complete.' 
+    return res.status(400).json({
+      error: 'Text too short',
+      userMessage: 'Write at least a few words before using auto-complete.'
     });
   }
 
   if (isTextComplete(text)) {
-    return res.status(400).json({ 
-      error: 'Text already complete', 
-      userMessage: 'Your text appears to be complete. Try writing an incomplete sentence for auto-completion.' 
+    return res.status(400).json({
+      error: 'Text already complete',
+      userMessage: 'Your text appears to be complete. Try writing an incomplete sentence for auto-completion.'
     });
   }
 
   const userId = pickUserId(req.user);
   logApiCall(userId, '/auto-complete');
-  
+
   if (isRateLimited(userId)) {
     return res.status(429).json({ error: 'Rate limit exceeded. Please wait a moment.' });
   }
 
   try {
     const trimmed = text.slice(-MAX_TEXT_LENGTH);
-    const cursorPos = (cursor !== undefined && cursor !== null && Number.isFinite(cursor)) 
-      ? Math.min(Math.max(cursor, 0), trimmed.length) 
+    const cursorPos = (cursor !== undefined && cursor !== null && Number.isFinite(cursor))
+      ? Math.min(Math.max(cursor, 0), trimmed.length)
       : trimmed.length;
-    
+
     const contextBeforeCursor = trimmed.slice(0, cursorPos);
     const context = contextBeforeCursor.slice(-5000); // Increased from 1000
-    
+
     console.log(`[Auto-complete] Using ${MODEL_FLASH} | Context length: ${context.length}, Cursor: ${cursorPos}`);
-    
+
     const payload = await generateCompletion(context);
     console.log('[Auto-complete] Generated:', payload.completion?.length || 0, 'chars');
     return res.json(payload);
@@ -525,13 +537,13 @@ router.get('/stats', auth, (req, res) => {
   const now = Date.now();
   const lastMinute = apiCallLog.filter(call => now - call.timestamp < 60000);
   const last5Minutes = apiCallLog.filter(call => now - call.timestamp < 300000);
-  
+
   const userId = pickUserId(req.user);
   const userCallsLastMin = lastMinute.filter(call => call.userId === userId).length;
   const userCallsLast5Min = last5Minutes.filter(call => call.userId === userId).length;
-  
+
   const geminiStats = getGeminiStats();
-  
+
   res.json({
     global: {
       apiCallsLastMinute: lastMinute.length,

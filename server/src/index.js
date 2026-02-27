@@ -12,6 +12,7 @@ const docRoutes = require('./routes/documents');
 const aiRoutes = require('./routes/ai');
 const voiceRoutes = require('./routes/voice');
 const { socketHandler } = require('./websockets');
+const { setupYjsWebSocket } = require('./yjs/setup');
 
 const app = express();
 
@@ -70,6 +71,12 @@ const io = socketio(server, {
   }
 });
 socketHandler(io);
+
+/* -------------------- Y.JS WEBSOCKET -------------------- */
+// Shares the same HTTP server via path-based upgrade routing:
+//   /yjs/{docId}    → Y.js CRDT sync (binary WebSocket)
+//   /socket.io/     → Socket.IO for AI, voice, saves (unchanged)
+setupYjsWebSocket(server);
 
 /* -------------------- DATABASE -------------------- */
 mongoose.connect(process.env.MONGO_URI, {

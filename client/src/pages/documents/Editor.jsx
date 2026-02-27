@@ -1,24 +1,28 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCaret from '@tiptap/extension-collaboration-caret';
 import { Toaster, toast } from 'react-hot-toast';
-import { 
-  Menu, X, Save, Eye, EyeOff, ChevronDown, User, LogOut, 
+import {
+  Menu, X, Save, Eye, EyeOff, ChevronDown, User, LogOut,
   FileText, Sparkles, PanelRightClose, PanelRight
 } from 'lucide-react';
 import api from '@/services/api';
 import { connectSocket } from '@/services/socket';
 import AIWritingAssistant from '@/components/editor/AIWritingAssistant';
 import VoiceRecorder from '@/components/editor/VoiceRecorder';
+import PresenceIndicator from '@/components/editor/PresenceIndicator';
 import { useVoiceStore } from '@/stores/voiceStore';
 import { voiceLogger } from '@/utils/voiceLogger';
 import { useAuth } from '@/auth/AuthProvider';
+import { createCollaboration } from '@/lib/collaboration';
 
 export default function EditorPage() {
   const { id: documentId } = useParams();
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, user: currentUser } = useAuth();
   const [status, setStatus] = useState('loading');
   const [docTitle, setDocTitle] = useState('Untitled Document');
   const [wordCount, setWordCount] = useState(0);
@@ -48,42 +52,98 @@ export default function EditorPage() {
   const voiceAnchorRef = useRef(null);
   const voiceInsertedLenRef = useRef(0);
 
+  // --- Y.js Collaboration setup ---
+  const yjsSyncedRef = useRef(false);
+  const [collab, setCollab] = useState(null);
+  const collabInstanceRef = useRef(null);
+
+  useEffect(() => {
+    if (!documentId || !currentUser) return;
+    
+    // Cleanup any existing instance before starting new one
+    if (collabInstanceRef.current) {
+      collabInstanceRef.current.destroy();
+    }
+
+    const instance = createCollaboration(documentId, currentUser);
+    collabInstanceRef.current = instance;
+    setCollab(instance);
+    console.log('[yjs] Connecting to doc:', documentId);
+
+    // Sync status listeners
+    const handleSync = (synced) => {
+      if (synced) {
+        yjsSyncedRef.current = true;
+        console.log('[yjs] Synced');
+      }
+    };
+    const handleStatus = ({ status }) => {
+      console.log('[yjs] Status:', status);
+      if (status === 'disconnected') yjsSyncedRef.current = false;
+    };
+
+    instance.provider.on('synced', handleSync);
+    instance.provider.on('status', handleStatus);
+
+    return () => {
+      instance.provider.off('synced', handleSync);
+      instance.provider.off('status', handleStatus);
+      instance.destroy();
+      collabInstanceRef.current = null;
+      setCollab(null);
+      yjsSyncedRef.current = false;
+    };
+  }, [documentId, currentUser]);
+
   const emitDocEdit = useCallback((json) => {
     const socket = socketRef.current;
     if (!socket?.connected) return;
-
     if (inFlightRef.current) {
       queuedJsonRef.current = json;
       return;
     }
-
     inFlightRef.current = true;
     socket.emit('doc:edit', { documentId, json, baseVersion: versionRef.current });
   }, [documentId]);
 
   const editor = useEditor({
-    extensions: [StarterKit],
+    extensions: [
+      // Use StarterKit without history to avoid conflicts
+      StarterKit.configure({
+        history: false,
+      }),
+      ...(collab ? [
+        Collaboration.configure({ 
+          document: collab.ydoc,
+          field: 'default' 
+        }),
+        CollaborationCaret.configure({
+          provider: collab.provider,
+          user: collab.userInfo,
+        }),
+      ] : []),
+    ],
     content: '',
     autofocus: true,
     onUpdate: ({ editor }) => {
       if (applyingRemoteRef.current) return;
-      // Update word count
-      const text = editor.getText();
-      const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+      
+      const words = editor.getText().trim()?.split(/\s+/).length || 0;
       setWordCount(words);
-      // Throttled emit
+
+      if (yjsSyncedRef.current) return;
+
       const now = Date.now();
       if (!editorRef.current) editorRef.current = { lastSent: 0 };
       if (now - editorRef.current.lastSent < 300) return;
       editorRef.current.lastSent = now;
       try {
-        const json = editor.getJSON();
-        emitDocEdit(json);
+        emitDocEdit(editor.getJSON());
       } catch (err) {
-        console.warn('emit editor-update failed', err);
+        console.warn('Socket.IO sync failed', err);
       }
     },
-  });
+  }, [collab]);
 
   const handleApiError = useCallback((err, setStateFunc, fallbackMessage) => {
     const errorData = err?.response?.data;
@@ -368,13 +428,27 @@ export default function EditorPage() {
         versionRef.current = typeof res.data?.version === 'number' ? res.data.version : 0;
         if (res.data?.title) setDocTitle(res.data.title);
         if (!editor) { setStatus('ready'); return; }
-        applyingRemoteRef.current = true;
-        if (!serverData) {
-          editor.commands.setContent({ type: 'doc', content: [{ type: 'paragraph' }] });
+
+        // When Y.js is active, only set content if the Y.js doc is empty
+        // (first user to open this doc initializes Y.js from MongoDB)
+        if (collab) {
+          const fragment = collab.ydoc.getXmlFragment('default');
+          if (fragment.length === 0 && serverData) {
+            applyingRemoteRef.current = true;
+            editor.commands.setContent(serverData);
+            applyingRemoteRef.current = false;
+          }
         } else {
-          editor.commands.setContent(serverData);
+          // No Y.js — use existing Socket.IO flow
+          applyingRemoteRef.current = true;
+          if (!serverData) {
+            editor.commands.setContent({ type: 'doc', content: [{ type: 'paragraph' }] });
+          } else {
+            editor.commands.setContent(serverData);
+          }
+          applyingRemoteRef.current = false;
         }
-        applyingRemoteRef.current = false;
+
         setWordCount(editor.getText().trim().split(/\s+/).filter(Boolean).length);
         setStatus('ready');
       } catch (err) {
@@ -385,7 +459,7 @@ export default function EditorPage() {
     }
     loadDoc();
     return () => { cancelled = true; };
-  }, [documentId, editor]);
+  }, [documentId, editor, collab]);
 
   // Socket setup
   useEffect(() => {
@@ -399,6 +473,8 @@ export default function EditorPage() {
         socketRef.current = socket;
         socket.on('connect', async () => {
           socket.emit('join-document', { documentId });
+          // Skip content refetch when Y.js is handling sync
+          if (yjsSyncedRef.current) return;
           try {
             const res = await api.get(`/documents/${documentId}`);
             const incomingVersion = typeof res.data?.version === 'number' ? res.data.version : 0;
@@ -426,13 +502,16 @@ export default function EditorPage() {
           const incomingVersion = typeof payload.version === 'number' ? payload.version : 0;
           versionRef.current = incomingVersion;
           if (typeof payload.title === 'string' && payload.title.trim()) setDocTitle(payload.title);
-          applyingRemoteRef.current = true;
-          try {
-            editor.commands.setContent(payload.data || { type: 'doc', content: [{ type: 'paragraph' }] });
-          } catch {
-            void 0;
+          // Skip content sync when Y.js is active
+          if (!yjsSyncedRef.current) {
+            applyingRemoteRef.current = true;
+            try {
+              editor.commands.setContent(payload.data || { type: 'doc', content: [{ type: 'paragraph' }] });
+            } catch {
+              void 0;
+            }
+            applyingRemoteRef.current = false;
           }
-          applyingRemoteRef.current = false;
           setStatus('ready');
         });
 
@@ -440,6 +519,13 @@ export default function EditorPage() {
           if (!editor || !payload) return;
           const incomingVersion = typeof payload.version === 'number' ? payload.version : 0;
           if (incomingVersion <= versionRef.current) return;
+
+          // When Y.js is synced, only track version — skip content replacement
+          if (yjsSyncedRef.current) {
+            versionRef.current = incomingVersion;
+            if (typeof payload.title === 'string' && payload.title.trim()) setDocTitle(payload.title);
+            return;
+          }
 
           if (inFlightRef.current) {
             const pendingVersion = typeof pendingRemoteRef.current?.version === 'number' ? pendingRemoteRef.current.version : 0;
@@ -508,6 +594,8 @@ export default function EditorPage() {
 
         socket.on('document-data', (payload) => {
           if (!editor) return;
+          // Skip content sync when Y.js is active
+          if (yjsSyncedRef.current) return;
           const incomingVersion = typeof payload?.version === 'number' ? payload.version : 0;
           if (incomingVersion && incomingVersion <= versionRef.current) return;
           if (incomingVersion) versionRef.current = incomingVersion;
@@ -525,6 +613,8 @@ export default function EditorPage() {
 
         socket.on('remote-editor-update', ({ json, version }) => {
           if (!editor || !json) return;
+          // Skip content sync when Y.js is active
+          if (yjsSyncedRef.current) return;
           const incomingVersion = typeof version === 'number' ? version : 0;
           if (incomingVersion && incomingVersion <= versionRef.current) return;
           if (incomingVersion) versionRef.current = incomingVersion;
@@ -739,7 +829,7 @@ export default function EditorPage() {
             />
           </div>
           
-          {/* Center: Status */}
+          {/* Center: Status + Presence */}
           <div className="hidden md:flex items-center gap-4 text-sm text-gray-500">
             <span>{wordCount} words</span>
             {lastSaved && (
@@ -749,6 +839,13 @@ export default function EditorPage() {
               </span>
             )}
             {isSaving && <span className="text-blue-600 animate-pulse">Saving...</span>}
+            {/* Collaborator presence indicators */}
+            {collab?.provider && (
+              <PresenceIndicator
+                provider={collab.provider}
+                currentUserId={currentUser?.id || currentUser?._id}
+              />
+            )}
           </div>
           
           {/* Right: Actions */}
