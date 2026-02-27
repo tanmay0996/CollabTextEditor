@@ -51,6 +51,11 @@ export default function EditorPage() {
   const pendingRemoteRef = useRef(null);
   const voiceAnchorRef = useRef(null);
   const voiceInsertedLenRef = useRef(0);
+  // Gate: prevents Socket.IO emits until the server has told us the real
+  // document version via doc:init. Without this, Y.js syncing content into
+  // the editor on refresh triggers onUpdate with baseVersion:0, which the
+  // server rejects → "Document was updated elsewhere" toast.
+  const docReadyRef = useRef(false);
 
   // --- Y.js Collaboration setup ---
   const yjsSyncedRef = useRef(false);
@@ -98,6 +103,9 @@ export default function EditorPage() {
   const emitDocEdit = useCallback((json) => {
     const socket = socketRef.current;
     if (!socket?.connected) return;
+    // Don't emit until doc:init has given us the real server version.
+    // Early emits with baseVersion:0 cause spurious doc:reject responses.
+    if (!docReadyRef.current) return;
     if (inFlightRef.current) {
       queuedJsonRef.current = json;
       return;
@@ -501,6 +509,9 @@ export default function EditorPage() {
           if (!editor || !payload) return;
           const incomingVersion = typeof payload.version === 'number' ? payload.version : 0;
           versionRef.current = incomingVersion;
+          // Open the gate — from this point onward emitDocEdit is allowed.
+          // We now know the authoritative server version so baseVersion will be correct.
+          docReadyRef.current = true;
           if (typeof payload.title === 'string' && payload.title.trim()) setDocTitle(payload.title);
           // Skip content sync when Y.js is active
           if (!yjsSyncedRef.current) {
