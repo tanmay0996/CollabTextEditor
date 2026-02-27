@@ -116,9 +116,11 @@ export default function EditorPage() {
 
   const editor = useEditor({
     extensions: [
-      // Use StarterKit without history to avoid conflicts
+      // TipTap v3: history was renamed to undoRedo. Need both keys to be safe.
+      // Collaboration extension manages its own undo/redo via Y.js UndoManager.
       StarterKit.configure({
-        history: false,
+        history: false,    // v2 key (kept for safety)
+        undoRedo: false,   // v3 key — this is what actually silences the warning
       }),
       ...(collab ? [
         Collaboration.configure({ 
