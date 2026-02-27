@@ -21,7 +21,7 @@ const Typo = require('typo-js');
 // dictionary to load empty and all words to pass spell-check silently.
 const DICT_PATH = path.join(
   require.resolve('typo-js'),
-  '../../dictionaries'
+  '../dictionaries'   // typo.js → up one → typo-js/ → + dictionaries = typo-js/dictionaries ✅
 );
 const dictionary = new Typo('en_US', false, false, { dictionaryPath: DICT_PATH });
 console.log('[Grammar] typo-js dictionary loaded from:', DICT_PATH);
