@@ -24,34 +24,29 @@ export function generateUserColor(userId) {
 
 /**
  * Build the Y.js WebSocket URL.
- * Uses the same host/port as the API server with /yjs path.
- * Dev:  ws://localhost:8000
- * Prod: wss://yourdomain.com
+ * Uses the backend server URL instead of window.location, which is crucial
+ * because frontend and backend deployed on Render have different domains.
  */
 function getWsUrl() {
-    // 1. Check environment variable override
+    // 1. Check for specific Yjs override
     if (import.meta.env.VITE_YJS_WS_URL) return import.meta.env.VITE_YJS_WS_URL;
 
-    // 2. Determine protocol
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    // 2. Read the backend API URL (same one used by Axios and Socket.IO)
+    const serverUrl = import.meta.env.VITE_REACT_APP_SERVER_URL || 'http://localhost:8000';
 
-    // 3. Determine host
-    const host = window.location.hostname;
+    // 3. Convert http:// to ws:// and https:// to wss://
+    let wsUrl = serverUrl.replace(/^http:\/\//i, 'ws://').replace(/^https:\/\//i, 'wss://');
 
-    // 4. Determine port
-    // In local dev, backend is always 8000. In production (Render), it's same host, no port needed.
-    let port = '';
-    if (host === 'localhost' || host === '127.0.0.1') {
-        port = '8000';
-    } else {
-        port = window.location.port; // might be empty for standard ports
+    // Remove trailing slash if present
+    if (wsUrl.endsWith('/')) {
+        wsUrl = wsUrl.slice(0, -1);
     }
 
-    // 5. Build base URL
-    const url = port ? `${proto}://${host}:${port}/yjs` : `${proto}://${host}/yjs`;
+    // 4. Append the /yjs path
+    const finalUrl = `${wsUrl}/yjs`;
 
-    console.log('[yjs] Target WebSocket URL:', url);
-    return url;
+    console.log('[yjs] Target WebSocket URL:', finalUrl);
+    return finalUrl;
 }
 
 /**
