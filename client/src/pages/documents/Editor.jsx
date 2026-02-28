@@ -163,30 +163,40 @@ export default function EditorPage() {
   }, []);
 
   // Manual save
-  const saveDocument = useCallback(async () => {
+  const saveDocument = useCallback(async (isAutoSave = false) => {
     if (!editor) return;
     setIsSaving(true);
+    const silent = isAutoSave === true;
     try {
       const json = editor.getJSON();
+      const startTime = Date.now();
+      
       const res = await api.put(`/documents/${documentId}`, { data: json, title: docTitle, baseVersion: versionRef.current });
       versionRef.current = typeof res.data?.version === 'number' ? res.data.version : versionRef.current;
+      
+      // Enforce a minimum display time of 1s so "Saving..." doesn't flicker quickly
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 1000) {
+        await new Promise(resolve => setTimeout(resolve, 1000 - elapsed));
+      }
+
       setLastSaved(new Date());
-      toast.success('Document saved');
+      if (!silent) toast.success('Document saved');
     } catch (err) {
       console.warn('Failed to save document', err);
       if (err?.response?.status === 409 && err?.response?.data?.doc) {
         const serverDoc = err.response.data.doc;
         versionRef.current = typeof serverDoc?.version === 'number' ? serverDoc.version : versionRef.current;
         if (serverDoc?.title) setDocTitle(serverDoc.title);
-        if (serverDoc?.data) {
+        if (serverDoc?.data && !collabInstanceRef.current) {
           applyingRemoteRef.current = true;
           try { editor.commands.setContent(serverDoc.data); } catch { void 0; }
           applyingRemoteRef.current = false;
+          if (!silent) toast.error('Your save was stale. Synced to latest.');
         }
-        toast.error('Your save was stale. Synced to latest.');
       } else {
         const msg = err?.response?.data?.error || err?.message || 'Failed to save document';
-        toast.error(msg);
+        if (!silent) toast.error(msg);
       }
     } finally {
       setIsSaving(false);
@@ -442,11 +452,26 @@ export default function EditorPage() {
         // When Y.js is active, only set content if the Y.js doc is empty
         // (first user to open this doc initializes Y.js from MongoDB)
         if (collab) {
-          const fragment = collab.ydoc.getXmlFragment('default');
-          if (fragment.length === 0 && serverData) {
-            applyingRemoteRef.current = true;
-            editor.commands.setContent(serverData);
-            applyingRemoteRef.current = false;
+          const seedContent = () => {
+             if (cancelled) return;
+             const fragment = collab.ydoc.getXmlFragment('default');
+             if (fragment.length === 0 && serverData) {
+                applyingRemoteRef.current = true;
+                editor.commands.setContent(serverData);
+                applyingRemoteRef.current = false;
+             }
+          };
+
+          if (yjsSyncedRef.current) {
+             seedContent();
+          } else {
+             const handler = (isSynced) => {
+                if (isSynced) {
+                   collab.provider.off('synced', handler);
+                   seedContent();
+                }
+             };
+             collab.provider.on('synced', handler);
           }
         } else {
           // No Y.js — use existing Socket.IO flow
@@ -484,7 +509,7 @@ export default function EditorPage() {
         socket.on('connect', async () => {
           socket.emit('join-document', { documentId });
           // Skip content refetch when Y.js is handling sync
-          if (yjsSyncedRef.current) return;
+          if (collabInstanceRef.current) return;
           try {
             const res = await api.get(`/documents/${documentId}`);
             const incomingVersion = typeof res.data?.version === 'number' ? res.data.version : 0;
@@ -516,7 +541,7 @@ export default function EditorPage() {
           docReadyRef.current = true;
           if (typeof payload.title === 'string' && payload.title.trim()) setDocTitle(payload.title);
           // Skip content sync when Y.js is active
-          if (!yjsSyncedRef.current) {
+          if (!collabInstanceRef.current) {
             applyingRemoteRef.current = true;
             try {
               editor.commands.setContent(payload.data || { type: 'doc', content: [{ type: 'paragraph' }] });
@@ -534,7 +559,7 @@ export default function EditorPage() {
           if (incomingVersion <= versionRef.current) return;
 
           // When Y.js is synced, only track version — skip content replacement
-          if (yjsSyncedRef.current) {
+          if (collabInstanceRef.current) {
             versionRef.current = incomingVersion;
             if (typeof payload.title === 'string' && payload.title.trim()) setDocTitle(payload.title);
             return;
@@ -597,18 +622,18 @@ export default function EditorPage() {
           const incomingVersion = typeof current?.version === 'number' ? current.version : 0;
           versionRef.current = incomingVersion;
           if (current?.title) setDocTitle(current.title);
-          if (editor && current?.data) {
+          if (editor && current?.data && !collabInstanceRef.current) {
             applyingRemoteRef.current = true;
             try { editor.commands.setContent(current.data); } catch { void 0; }
             applyingRemoteRef.current = false;
+            toast.error('Document was updated elsewhere. Synced to latest.');
           }
-          toast.error('Document was updated elsewhere. Synced to latest.');
         });
 
         socket.on('document-data', (payload) => {
           if (!editor) return;
           // Skip content sync when Y.js is active
-          if (yjsSyncedRef.current) return;
+          if (collabInstanceRef.current) return;
           const incomingVersion = typeof payload?.version === 'number' ? payload.version : 0;
           if (incomingVersion && incomingVersion <= versionRef.current) return;
           if (incomingVersion) versionRef.current = incomingVersion;
@@ -627,7 +652,7 @@ export default function EditorPage() {
         socket.on('remote-editor-update', ({ json, version }) => {
           if (!editor || !json) return;
           // Skip content sync when Y.js is active
-          if (yjsSyncedRef.current) return;
+          if (collabInstanceRef.current) return;
           const incomingVersion = typeof version === 'number' ? version : 0;
           if (incomingVersion && incomingVersion <= versionRef.current) return;
           if (incomingVersion) versionRef.current = incomingVersion;
@@ -650,8 +675,14 @@ export default function EditorPage() {
 
   // Auto-save
   useEffect(() => {
-    return () => void 0;
-  }, [documentId, editor, docTitle]);
+    let interval = setInterval(() => {
+      // Auto-save every 10 seconds if using Y.js and it's synced
+      if (editor && !isSaving && yjsSyncedRef.current && collabInstanceRef.current) {
+         saveDocument(true);
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [saveDocument, editor, isSaving]);
 
   // Selection tracking
   useEffect(() => {
@@ -845,13 +876,19 @@ export default function EditorPage() {
           {/* Center: Status + Presence */}
           <div className="hidden md:flex items-center gap-4 text-sm text-gray-500">
             <span>{wordCount} words</span>
-            {lastSaved && (
-              <span className="flex items-center gap-1">
-                <Save className="w-3.5 h-3.5" />
-                {lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            )}
-            {isSaving && <span className="text-blue-600 animate-pulse">Saving...</span>}
+            
+            {/* Fixed width container prevents layout jitter when isSaving toggles */}
+            <div className="flex items-center gap-1 min-w-[100px] justify-center">
+              {isSaving ? (
+                <span className="text-blue-600 animate-pulse">Saving...</span>
+              ) : lastSaved ? (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  {lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </>
+              ) : null}
+            </div>
+
             {/* Collaborator presence indicators */}
             {collab?.provider && (
               <PresenceIndicator
